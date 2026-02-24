@@ -291,6 +291,41 @@
       resultEl.textContent = text;
     }
 
+    // ---- Beep helpers (iPhone Safari 配慮) ----
+    let __beepCtx = null;
+    let __beepGain = null;
+    function ensureBeepReady_() {
+      try {
+        const Ctx = window.AudioContext || window.webkitAudioContext;
+        if (!Ctx) return;
+        if (!__beepCtx) {
+          __beepCtx = new Ctx();
+        }
+        if (__beepCtx.state === 'suspended') {
+          __beepCtx.resume().catch(() => {});
+        }
+        if (!__beepGain) {
+          __beepGain = __beepCtx.createGain();
+          __beepGain.gain.value = 0.06; // 控えめ音量
+          __beepGain.connect(__beepCtx.destination);
+        }
+      } catch (_) {}
+    }
+
+    function playScanBeep_() {
+      try {
+        if (!__beepCtx) ensureBeepReady_();
+        if (!__beepCtx || !__beepGain) return;
+        const osc = __beepCtx.createOscillator();
+        osc.type = 'sine';
+        osc.frequency.value = 1000; // 1kHz程度
+        osc.connect(__beepGain);
+        const now = __beepCtx.currentTime;
+        osc.start(now);
+        osc.stop(now + 0.15); // 150ms ビープ
+      } catch (_) {}
+    }
+
     function getCurrentSettings_() {
       const operator = (operatorEl && typeof operatorEl.value === 'string' && operatorEl.value.trim())
         || (localStorage.getItem(LS_KEYS.operator) || '').trim();
@@ -559,6 +594,8 @@
                       scannedAt: new Date().toISOString()
                     };
                     window.__checkinPending = pending;
+                    // 新規pending作成タイミングでのみビープ
+                    playScanBeep_();
 
                     const elPendingBib = document.getElementById('pendingBib');
                     const elPendingName = document.getElementById('pendingName');
@@ -850,20 +887,23 @@
       resetPendingCheckinUi('取消しました');
     }
 
-    btnStart.addEventListener('click', startCamera);
+    btnStart.addEventListener('click', () => { try { ensureBeepReady_(); } catch(_) {} startCamera(); });
     btnStop.addEventListener('click', stopCamera);
 
     btnLoadSettings.addEventListener('click', loadSettings);
-    btnSaveSettings.addEventListener('click', saveSettings);
+    btnSaveSettings.addEventListener('click', () => { try { ensureBeepReady_(); } catch(_) {} saveSettings(); });
     btnClearSettings.addEventListener('click', clearSettings);
 
-    btnFetchRoster.addEventListener('click', fetchRoster);
+    btnFetchRoster.addEventListener('click', () => { try { ensureBeepReady_(); } catch(_) {} fetchRoster(); });
     btnShowRosterInfo.addEventListener('click', showRosterInfo);
 
     // 受付確定
-    document.getElementById('runBtn')?.addEventListener('click', () => handleCheckinActionSelect_('RUN'));
-    document.getElementById('dnsBtn')?.addEventListener('click', () => handleCheckinActionSelect_('DNS'));
-    document.getElementById('cancelBtn')?.addEventListener('click', handleCheckinCancel_);
+    document.getElementById('runBtn')?.addEventListener('click', () => { try { ensureBeepReady_(); } catch(_) {} handleCheckinActionSelect_('RUN'); });
+    document.getElementById('dnsBtn')?.addEventListener('click', () => { try { ensureBeepReady_(); } catch(_) {} handleCheckinActionSelect_('DNS'); });
+    document.getElementById('cancelBtn')?.addEventListener('click', () => { try { ensureBeepReady_(); } catch(_) {} handleCheckinCancel_(); });
+
+    // 初回ジェスチャでの有効化保険（ワンクリックのみ）
+    try { document.addEventListener('click', ensureBeepReady_, { once: true, capture: true }); } catch(_) {}
 
     // 初期状態（受付確定UI）
     resetPendingCheckinUi();
