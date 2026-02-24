@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <title>MST26 受付（checkin）- settings + camera + qr test</title>
+  <title>MST26 受付（checkin）- roster test</title>
   <style>
     :root {
       --bg: #111;
@@ -61,6 +61,7 @@
     }
     .substatus.ok { color: var(--ok); }
     .substatus.ng { color: var(--ng); }
+    .substatus.warn { color: var(--warn); }
     .substatus.muted { color: var(--muted); }
 
     .camera-box {
@@ -164,7 +165,10 @@
     <div class="title">受付</div>
 
     <div class="card">
-      <div class="label" style="margin-top:0;">API KEY</div>
+      <div class="label" style="margin-top:0;">API Base URL（GAS /exec など）</div>
+      <input id="apiBaseUrl" class="input" type="url" inputmode="url" autocomplete="off" placeholder="https://.../exec" />
+
+      <div class="label">API KEY</div>
       <input id="apiKey" class="input" type="text" inputmode="text" autocomplete="off" placeholder="API KEYを入力" />
 
       <div class="label">operator（担当者名）</div>
@@ -178,7 +182,18 @@
 
       <div id="settingsStatus" class="substatus muted">設定はまだ保存していません</div>
       <div class="small">
-        ※ この段階では localStorage 保存/読込のみ。API送信はまだ行いません。
+        ※ API Base URL / API KEY / operator を localStorage に保存します（端末内のみ）。
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="row">
+        <button id="btnFetchRoster" class="primary">名簿更新</button>
+        <button id="btnShowRosterInfo">名簿情報</button>
+      </div>
+      <div id="rosterStatus" class="substatus muted">名簿未取得</div>
+      <div class="small">
+        ※ `/roster` 接続テスト。失敗時は `?action=roster` も自動で試します（GAS互換のため）。
       </div>
     </div>
 
@@ -199,8 +214,8 @@
       <div id="result" class="result">まだ読取なし</div>
 
       <div class="small">
-        ※ これは受付UIの段階実装（設定保存 + QR読取テスト）です。API接続はまだ入れていません。<br>
-        ※ CP1（mst26-cp1）には影響しません。
+        ※ これは受付UIの段階実装（設定保存 + 名簿更新 + QR読取テスト）です。<br>
+        ※ `/checkin` はまだ未実装です。CP1（mst26-cp1）には影響しません。
       </div>
       <div id="debug" class="mono"></div>
     </div>
@@ -212,8 +227,11 @@
   <script>
     // ---- storage keys (checkin専用) ----
     const LS_KEYS = {
+      apiBaseUrl: 'mst26.checkin.apiBaseUrl',
       apiKey: 'mst26.checkin.apiKey',
-      operator: 'mst26.checkin.operator'
+      operator: 'mst26.checkin.operator',
+      roster: 'mst26.checkin.roster',
+      rosterGeneratedAt: 'mst26.checkin.roster.generatedAt'
     };
 
     const statusEl = document.getElementById('status');
@@ -223,12 +241,17 @@
     const btnStart = document.getElementById('btnStart');
     const btnStop = document.getElementById('btnStop');
 
+    const apiBaseUrlEl = document.getElementById('apiBaseUrl');
     const apiKeyEl = document.getElementById('apiKey');
     const operatorEl = document.getElementById('operator');
     const btnLoadSettings = document.getElementById('btnLoadSettings');
     const btnSaveSettings = document.getElementById('btnSaveSettings');
     const btnClearSettings = document.getElementById('btnClearSettings');
     const settingsStatusEl = document.getElementById('settingsStatus');
+
+    const btnFetchRoster = document.getElementById('btnFetchRoster');
+    const btnShowRosterInfo = document.getElementById('btnShowRosterInfo');
+    const rosterStatusEl = document.getElementById('rosterStatus');
 
     let stream = null;
     let rafId = null;
@@ -248,6 +271,11 @@
       settingsStatusEl.className = 'substatus ' + kind;
     }
 
+    function setRosterStatus(text, kind = 'muted') {
+      rosterStatusEl.textContent = text;
+      rosterStatusEl.className = 'substatus ' + kind;
+    }
+
     function setDebug(obj) {
       try {
         debugEl.textContent = typeof obj === 'string' ? obj : JSON.stringify(obj, null, 2);
@@ -260,26 +288,41 @@
       resultEl.textContent = text;
     }
 
+    function normalizeBaseUrl(url) {
+      return String(url || '').trim().replace(/\/+$/, '');
+    }
+
     function loadSettings() {
+      const apiBaseUrl = localStorage.getItem(LS_KEYS.apiBaseUrl) || '';
       const apiKey = localStorage.getItem(LS_KEYS.apiKey) || '';
       const operator = localStorage.getItem(LS_KEYS.operator) || '';
+
+      apiBaseUrlEl.value = apiBaseUrl;
       apiKeyEl.value = apiKey;
       operatorEl.value = operator;
 
-      if (apiKey || operator) {
+      if (apiBaseUrl || apiKey || operator) {
         setSettingsStatus('保存済み設定を読込しました', 'ok');
       } else {
         setSettingsStatus('保存済み設定はありません', 'muted');
       }
+
+      refreshRosterStatusFromLocal();
     }
 
     function saveSettings() {
+      const apiBaseUrl = normalizeBaseUrl(apiBaseUrlEl.value);
       const apiKey = (apiKeyEl.value || '').trim();
       const operator = (operatorEl.value || '').trim();
 
+      localStorage.setItem(LS_KEYS.apiBaseUrl, apiBaseUrl);
       localStorage.setItem(LS_KEYS.apiKey, apiKey);
       localStorage.setItem(LS_KEYS.operator, operator);
 
+      if (!apiBaseUrl) {
+        setSettingsStatus('保存しました（API Base URL が空です）', 'ng');
+        return;
+      }
       if (!apiKey) {
         setSettingsStatus('保存しました（API KEY が空です）', 'ng');
         return;
@@ -293,11 +336,145 @@
     }
 
     function clearSettings() {
+      localStorage.removeItem(LS_KEYS.apiBaseUrl);
       localStorage.removeItem(LS_KEYS.apiKey);
       localStorage.removeItem(LS_KEYS.operator);
+      apiBaseUrlEl.value = '';
       apiKeyEl.value = '';
       operatorEl.value = '';
       setSettingsStatus('設定を消去しました', 'muted');
+    }
+
+    function getLocalRoster() {
+      try {
+        const raw = localStorage.getItem(LS_KEYS.roster);
+        if (!raw) return [];
+        const arr = JSON.parse(raw);
+        return Array.isArray(arr) ? arr : [];
+      } catch {
+        return [];
+      }
+    }
+
+    function saveLocalRoster(roster, generatedAt) {
+      localStorage.setItem(LS_KEYS.roster, JSON.stringify(roster || []));
+      localStorage.setItem(LS_KEYS.rosterGeneratedAt, String(generatedAt || ''));
+    }
+
+    function refreshRosterStatusFromLocal() {
+      const roster = getLocalRoster();
+      const generatedAt = localStorage.getItem(LS_KEYS.rosterGeneratedAt) || '';
+      if (roster.length > 0) {
+        setRosterStatus(`名簿あり: ${roster.length}件${generatedAt ? ' / ' + generatedAt : ''}`, 'ok');
+      } else {
+        setRosterStatus('名簿未取得', 'muted');
+      }
+    }
+
+    function getSettingsForApi() {
+      const apiBaseUrl = normalizeBaseUrl(apiBaseUrlEl.value || localStorage.getItem(LS_KEYS.apiBaseUrl) || '');
+      const apiKey = (apiKeyEl.value || localStorage.getItem(LS_KEYS.apiKey) || '').trim();
+      return { apiBaseUrl, apiKey };
+    }
+
+    async function fetchJsonNoCorsHeaders(url) {
+      const res = await fetch(url, { method: 'GET', cache: 'no-store' });
+      const text = await res.text();
+      let json = null;
+      try {
+        json = JSON.parse(text);
+      } catch (_) {
+        // JSONでない場合あり
+      }
+      return { res, text, json };
+    }
+
+    async function fetchRoster() {
+      const { apiBaseUrl, apiKey } = getSettingsForApi();
+
+      if (!apiBaseUrl) {
+        setRosterStatus('名簿更新失敗（API Base URL 未設定）', 'ng');
+        return;
+      }
+      if (!apiKey) {
+        setRosterStatus('名簿更新失敗（API KEY 未設定）', 'ng');
+        return;
+      }
+
+      btnFetchRoster.disabled = true;
+      setRosterStatus('名簿更新中…', 'muted');
+      setDebug('');
+
+      // 互換のため2パターン試す:
+      // 1) /roster?key=...
+      // 2) ?action=roster&key=...
+      const candidates = [
+        `${apiBaseUrl}/roster?key=${encodeURIComponent(apiKey)}`,
+        `${apiBaseUrl}?action=roster&key=${encodeURIComponent(apiKey)}`
+      ];
+
+      let lastErr = null;
+
+      for (const url of candidates) {
+        try {
+          const { res, text, json } = await fetchJsonNoCorsHeaders(url);
+
+          if (!res.ok) {
+            lastErr = `HTTP ${res.status}`;
+            continue;
+          }
+
+          let roster = [];
+          let generatedAt = '';
+
+          if (json && Array.isArray(json.roster)) {
+            roster = json.roster;
+            generatedAt = json.generated_at || '';
+          } else if (Array.isArray(json)) {
+            roster = json;
+          } else if (json && Array.isArray(json.items)) {
+            roster = json.items;
+            generatedAt = json.generated_at || '';
+          } else {
+            lastErr = 'JSON形式不明';
+            setDebug({
+              tried: url,
+              responsePreview: text.slice(0, 500)
+            });
+            continue;
+          }
+
+          saveLocalRoster(roster, generatedAt);
+          setRosterStatus(`名簿更新OK: ${roster.length}件`, 'ok');
+          setDebug({
+            endpoint: url,
+            generated_at: generatedAt || null,
+            firstItem: roster[0] || null
+          });
+          return;
+        } catch (e) {
+          lastErr = (e?.name ? e.name + ': ' : '') + (e?.message || String(e));
+        }
+      }
+
+      setRosterStatus('名簿更新失敗（通信？）', 'ng');
+      setDebug(`roster fetch failed: ${lastErr || 'unknown error'}`);
+    }
+
+    function showRosterInfo() {
+      const roster = getLocalRoster();
+      const generatedAt = localStorage.getItem(LS_KEYS.rosterGeneratedAt) || '';
+      if (!roster.length) {
+        setRosterStatus('保存済み名簿はありません', 'muted');
+        setDebug('roster: empty');
+        return;
+      }
+      setRosterStatus(`名簿あり: ${roster.length}件`, 'ok');
+      setDebug({
+        count: roster.length,
+        generated_at: generatedAt || null,
+        firstItem: roster[0] || null
+      });
     }
 
     function parseMst26Qr(raw) {
@@ -418,6 +595,9 @@
     btnLoadSettings.addEventListener('click', loadSettings);
     btnSaveSettings.addEventListener('click', saveSettings);
     btnClearSettings.addEventListener('click', clearSettings);
+
+    btnFetchRoster.addEventListener('click', fetchRoster);
+    btnShowRosterInfo.addEventListener('click', showRosterInfo);
 
     // 初回表示時に保存済み設定があれば反映
     loadSettings();
