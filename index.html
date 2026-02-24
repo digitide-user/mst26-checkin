@@ -217,7 +217,8 @@
       </div>
 
       
-      <div id="debug" class="mono"></div>
+      <!-- debug JSON は残すがUIでは非表示（必要時のみ再表示） -->
+      <div id="debug" class="mono" style="display:none;"></div>
     </div>
   </div>
 
@@ -296,6 +297,33 @@
       return { operator };
     }
 
+    function isOperatorSaved_() {
+      const v = (localStorage.getItem(LS_KEYS.operator) || '').trim();
+      return v.length > 0;
+    }
+
+    function isRosterLoaded_() {
+      try {
+        const roster = getLocalRoster();
+        return Array.isArray(roster) && roster.length > 0;
+      } catch (_) {
+        return false;
+      }
+    }
+
+    function updateCheckinControlsState_() {
+      const pendingOk = !!(window.__checkinPending);
+      const operatorOk = isOperatorSaved_();
+      const rosterOk = isRosterLoaded_();
+      const elRunBtn = document.getElementById('runBtn');
+      const elDnsBtn = document.getElementById('dnsBtn');
+      const elCancelBtn = document.getElementById('cancelBtn');
+      const enableRunDns = pendingOk && operatorOk && rosterOk;
+      if (elRunBtn) elRunBtn.disabled = !enableRunDns;
+      if (elDnsBtn) elDnsBtn.disabled = !enableRunDns;
+      if (elCancelBtn) elCancelBtn.disabled = !pendingOk;
+    }
+
     // 用途ごと（'roster' / 'checkin'）に不足メッセージを適切な場所へ表示
     function ensureSettingsOrWarn_(context = 'roster') {
       const { operator } = getCurrentSettings_();
@@ -329,6 +357,7 @@
       }
 
       refreshRosterStatusFromLocal();
+      updateCheckinControlsState_();
     }
 
     function saveSettings() {
@@ -344,6 +373,7 @@
       }
 
       setSettingsStatus('設定を保存しました', 'ok');
+      updateCheckinControlsState_();
     }
 
     function clearSettings() {
@@ -352,6 +382,7 @@
       if (apiKeyEl) apiKeyEl.value = '';
       operatorEl.value = '';
       setSettingsStatus('設定を消去しました', 'muted');
+      updateCheckinControlsState_();
     }
 
     function getLocalRoster() {
@@ -435,6 +466,7 @@
 
         saveLocalRoster(roster, generatedAt);
         setRosterStatus(`名簿更新OK: ${roster.length}件`, 'ok');
+        updateCheckinControlsState_();
         setDebug({
           endpoint: url,
           generated_at: generatedAt || null,
@@ -535,9 +567,7 @@
                   if (elPendingRaw) elPendingRaw.textContent = parsed.raw;
                   if (elPendingState) elPendingState.textContent = '未選択';
 
-                  if (elRunBtn) elRunBtn.disabled = false;
-                  if (elDnsBtn) elDnsBtn.disabled = false;
-                  if (elCancelBtn) elCancelBtn.disabled = false;
+                  updateCheckinControlsState_();
 
                   if (elCheckinActionResult) {
                     elCheckinActionResult.textContent = '確定待ち（RUN / DNS / 取消 を選択）';
@@ -715,6 +745,7 @@
       if (elCancelBtn) elCancelBtn.disabled = true;
 
       if (elCheckinActionResult) elCheckinActionResult.textContent = actionMsg;
+      updateCheckinControlsState_();
     }
 
     async function handleCheckinActionSelect_(state) {
@@ -725,9 +756,13 @@
         return;
       }
 
-      // 送信前チェック（GAS運用踏襲）
+      // 送信前チェック（GAS運用踏襲 + 名簿必須）
       if (!ensureSettingsOrWarn_('checkin')) {
         // pending は保持（再入力後に再送可能）
+        return;
+      }
+      if (!isRosterLoaded_()) {
+        if (elCheckinActionResult) elCheckinActionResult.textContent = '送信不可: 名簿未取得';
         return;
       }
 
