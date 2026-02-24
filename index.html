@@ -507,7 +507,10 @@
                     bib: parsed.bib,
                     name: name || '',
                     raw: parsed.raw,
-                    state: '' // RUN / DNS はまだ未選択
+                    state: '', // RUN / DNS はまだ未選択
+                    // 再送時の重複送信を避けるため、event_id / scanned_at を固定化
+                    eventId: makeCheckinEventId_(),
+                    scannedAt: new Date().toISOString()
                   };
                   window.__checkinPending = pending;
 
@@ -658,11 +661,14 @@
         ((operatorEl && operatorEl.value) ? operatorEl.value : (localStorage.getItem(LS_KEYS.operator) || ''))
           .trim();
 
+      const eventId = pending?.eventId || makeCheckinEventId_();
+      const scannedAt = pending?.scannedAt || new Date().toISOString();
+
       const payload = {
-        event_id: makeCheckinEventId_(),
+        event_id: eventId,
         bibNumber: Number(pending.bib),
         start_status: toCheckinStartStatus_(uiState),
-        scanned_at: new Date().toISOString(),
+        scanned_at: scannedAt,
         device_id: getOrCreateCheckinDeviceId_(),
         operator
       };
