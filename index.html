@@ -306,7 +306,7 @@
         }
         if (!__beepGain) {
           __beepGain = __beepCtx.createGain();
-          __beepGain.gain.value = 0.12; // 少し上げる
+          __beepGain.gain.value = 0.09; // 少し控えめ
           __beepGain.connect(__beepCtx.destination);
         }
       } catch (_) {}
@@ -322,7 +322,7 @@
         osc.connect(__beepGain);
         const now = __beepCtx.currentTime;
         osc.start(now);
-        osc.stop(now + 0.20); // 200ms ビープ
+        osc.stop(now + 0.17); // 170ms ビープ
       } catch (_) {}
     }
 
