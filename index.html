@@ -475,8 +475,24 @@
 
                 const parsed = parseMst26Qr(code.data);
                 if (parsed) {
-                  setStatus('QR読取OK（MST26形式）', 'ok');
-                  setResult(`bib: ${parsed.bib} / raw: ${parsed.raw}`);
+                  const roster = getLocalRoster();
+                  const hit = roster.find((it) => {
+                    const bibVal = Number(it?.bibNumber ?? it?.bib);
+                    return Number.isFinite(bibVal) && bibVal === parsed.bib;
+                  }) || null;
+
+                  const name = hit ? String(hit.name ?? hit.runnerName ?? hit.fullName ?? '').trim() : '';
+
+                  if (name) {
+                    setStatus('QR読取OK（名簿照合OK）', 'ok');
+                    setResult(`bib: ${parsed.bib} / ${name} / raw: ${parsed.raw}`);
+                  } else if (roster.length === 0) {
+                    setStatus('QR読取OK（名簿未取得）', 'warn');
+                    setResult(`bib: ${parsed.bib} / 名簿未取得 / raw: ${parsed.raw}`);
+                  } else {
+                    setStatus('QR読取OK（名簿該当なし）', 'warn');
+                    setResult(`bib: ${parsed.bib} / 名簿該当なし / raw: ${parsed.raw}`);
+                  }
                 } else {
                   setStatus('QR読取OK（形式未対応）', 'warn');
                   setResult(`raw: ${code.data}`);
