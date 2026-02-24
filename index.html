@@ -211,6 +211,25 @@
       <div class="label">読取結果（テスト）</div>
       <div id="result" class="result">まだ読取なし</div>
 
+      <section style="margin-top:16px; padding:12px; border:1px solid #ccc; border-radius:8px;">
+        <h2 style="margin:0 0 8px 0; font-size:16px;">受付確定（テスト段階）</h2>
+
+        <div id="pendingCheckinCard" style="padding:10px; background:#f7f7f7; border-radius:6px; margin-bottom:10px;">
+          <div><strong>bib:</strong> <span id="pendingBib">-</span></div>
+          <div><strong>氏名:</strong> <span id="pendingName">-</span></div>
+          <div><strong>raw:</strong> <span id="pendingRaw">-</span></div>
+          <div><strong>状態:</strong> <span id="pendingState">未選択</span></div>
+        </div>
+
+        <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:8px;">
+          <button id="runBtn" type="button" disabled>RUN</button>
+          <button id="dnsBtn" type="button" disabled>DNS</button>
+          <button id="cancelBtn" type="button" disabled>取消</button>
+        </div>
+
+        <div id="checkinActionResult">まだ未確定</div>
+      </section>
+
       <div class="small">
         ※ これは受付UIの段階実装（設定保存 + 名簿更新 + QR読取テスト）です。<br>
         ※ <code>/checkin</code> はまだ未実装です。CP1（mst26-cp1）には影響しません。
@@ -483,6 +502,38 @@
 
                   const name = hit ? String(hit.name ?? hit.runnerName ?? hit.fullName ?? '').trim() : '';
 
+                  // ---- 受付確定UI（テスト段階）へ反映 ----
+                  const pending = {
+                    bib: parsed.bib,
+                    name: name || '',
+                    raw: parsed.raw,
+                    state: '' // RUN / DNS はまだ未選択
+                  };
+                  window.__checkinPending = pending;
+
+                  const elPendingBib = document.getElementById('pendingBib');
+                  const elPendingName = document.getElementById('pendingName');
+                  const elPendingRaw = document.getElementById('pendingRaw');
+                  const elPendingState = document.getElementById('pendingState');
+                  const elRunBtn = document.getElementById('runBtn');
+                  const elDnsBtn = document.getElementById('dnsBtn');
+                  const elCancelBtn = document.getElementById('cancelBtn');
+                  const elCheckinActionResult = document.getElementById('checkinActionResult');
+
+                  if (elPendingBib) elPendingBib.textContent = String(parsed.bib);
+                  if (elPendingName) elPendingName.textContent = name || '（名簿該当なし）';
+                  if (elPendingRaw) elPendingRaw.textContent = parsed.raw;
+                  if (elPendingState) elPendingState.textContent = '未選択';
+
+                  if (elRunBtn) elRunBtn.disabled = false;
+                  if (elDnsBtn) elDnsBtn.disabled = false;
+                  if (elCancelBtn) elCancelBtn.disabled = false;
+
+                  if (elCheckinActionResult) {
+                    elCheckinActionResult.textContent = '確定待ち（RUN / DNS / 取消 を選択）';
+                  }
+
+                  // ---- 既存の読取結果表示 ----
                   if (name) {
                     setStatus('QR読取OK（名簿照合OK）', 'ok');
                     setResult(`bib: ${parsed.bib} / ${name} / raw: ${parsed.raw}`);
@@ -566,6 +617,64 @@
       }
     }
 
+    function resetPendingCheckinUi(actionMsg = 'まだ未確定') {
+      window.__checkinPending = null;
+
+      const elPendingBib = document.getElementById('pendingBib');
+      const elPendingName = document.getElementById('pendingName');
+      const elPendingRaw = document.getElementById('pendingRaw');
+      const elPendingState = document.getElementById('pendingState');
+      const elRunBtn = document.getElementById('runBtn');
+      const elDnsBtn = document.getElementById('dnsBtn');
+      const elCancelBtn = document.getElementById('cancelBtn');
+      const elCheckinActionResult = document.getElementById('checkinActionResult');
+
+      if (elPendingBib) elPendingBib.textContent = '-';
+      if (elPendingName) elPendingName.textContent = '-';
+      if (elPendingRaw) elPendingRaw.textContent = '-';
+      if (elPendingState) elPendingState.textContent = '未選択';
+
+      if (elRunBtn) elRunBtn.disabled = true;
+      if (elDnsBtn) elDnsBtn.disabled = true;
+      if (elCancelBtn) elCancelBtn.disabled = true;
+
+      if (elCheckinActionResult) elCheckinActionResult.textContent = actionMsg;
+    }
+
+    function handleCheckinActionSelect_(state) {
+      const pending = window.__checkinPending || null;
+      if (!pending) {
+        const elCheckinActionResult = document.getElementById('checkinActionResult');
+        if (elCheckinActionResult) elCheckinActionResult.textContent = '先にQRを読み取ってください';
+        return;
+      }
+
+      pending.state = state;
+      window.__checkinPending = pending;
+
+      const elPendingState = document.getElementById('pendingState');
+      const elRunBtn = document.getElementById('runBtn');
+      const elDnsBtn = document.getElementById('dnsBtn');
+      const elCancelBtn = document.getElementById('cancelBtn');
+      const elCheckinActionResult = document.getElementById('checkinActionResult');
+
+      if (elPendingState) elPendingState.textContent = state;
+
+      // テスト段階の仮動作：
+      // RUN/DNS を押したら一旦選択確定状態にして、取消だけ可能にする
+      if (elRunBtn) elRunBtn.disabled = true;
+      if (elDnsBtn) elDnsBtn.disabled = true;
+      if (elCancelBtn) elCancelBtn.disabled = false;
+
+      if (elCheckinActionResult) {
+        elCheckinActionResult.textContent = `送信未実装（テスト）: ${state} を選択`;
+      }
+    }
+
+    function handleCheckinCancel_() {
+      resetPendingCheckinUi('取消しました（テスト）');
+    }
+
     btnStart.addEventListener('click', startCamera);
     btnStop.addEventListener('click', stopCamera);
 
@@ -575,6 +684,14 @@
 
     btnFetchRoster.addEventListener('click', fetchRoster);
     btnShowRosterInfo.addEventListener('click', showRosterInfo);
+
+    // 受付確定（テスト段階）
+    document.getElementById('runBtn')?.addEventListener('click', () => handleCheckinActionSelect_('RUN'));
+    document.getElementById('dnsBtn')?.addEventListener('click', () => handleCheckinActionSelect_('DNS'));
+    document.getElementById('cancelBtn')?.addEventListener('click', handleCheckinCancel_);
+
+    // 初期状態（受付確定UI）
+    resetPendingCheckinUi();
 
     // 初回表示時に保存済み設定があれば反映
     loadSettings();
