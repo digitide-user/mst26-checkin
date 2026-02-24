@@ -165,9 +165,6 @@
     <div class="title">受付</div>
 
     <div class="card">
-      <div class="label" style="margin-top:0;">API KEY</div>
-      <input id="apiKey" class="input" type="text" inputmode="text" autocomplete="off" placeholder="API KEYを入力（/checkin用）" />
-
       <div class="label">operator（担当者名）</div>
       <input id="operator" class="input" type="text" inputmode="text" autocomplete="off" placeholder="例: けんすけ" />
 
@@ -180,7 +177,7 @@
       <div id="settingsStatus" class="substatus muted">設定はまだ保存していません</div>
       <div class="small">
         ※ API Base URL はコード内固定（CP1と同じアクセス方式）です。<br>
-        ※ API KEY / operator を localStorage に保存します（端末内のみ）。
+        ※ operator を localStorage に保存します（端末内のみ）。API KEY は現時点では未使用です。
       </div>
     </div>
 
@@ -307,11 +304,43 @@
       resultEl.textContent = text;
     }
 
+    function getCurrentSettings_() {
+      const apiKey = (apiKeyEl && typeof apiKeyEl.value === 'string' && apiKeyEl.value.trim())
+        || (localStorage.getItem(LS_KEYS.apiKey) || '').trim();
+      const operator = (operatorEl && typeof operatorEl.value === 'string' && operatorEl.value.trim())
+        || (localStorage.getItem(LS_KEYS.operator) || '').trim();
+      return { apiKey, operator };
+    }
+
+    // 用途ごと（'roster' / 'checkin'）に不足メッセージを適切な場所へ表示
+    function ensureSettingsOrWarn_(context = 'roster') {
+      const { apiKey, operator } = getCurrentSettings_();
+      const missing = [];
+      if (!apiKey) missing.push('API KEY');
+      if (!operator) missing.push('operator');
+      if (missing.length === 0) return true;
+
+      const msgMissing = missing.join(' / ');
+      const baseMsg = context === 'checkin'
+        ? `送信不可: 設定未入力（${msgMissing}）`
+        : `名簿更新不可: 設定未入力（${msgMissing}）`;
+
+      // 表示先を用途で切り替えつつ、設定にも注意喚起
+      if (context === 'checkin') {
+        const elCheckinActionResult = document.getElementById('checkinActionResult');
+        if (elCheckinActionResult) elCheckinActionResult.textContent = baseMsg;
+      } else {
+        setRosterStatus(baseMsg, 'ng');
+      }
+      setSettingsStatus(`設定が不足しています（${msgMissing}）。設定を保存してください。`, 'warn');
+      return false;
+    }
+
     function loadSettings() {
       const apiKey = localStorage.getItem(LS_KEYS.apiKey) || '';
       const operator = localStorage.getItem(LS_KEYS.operator) || '';
 
-      apiKeyEl.value = apiKey;
+      if (apiKeyEl) apiKeyEl.value = apiKey;
       operatorEl.value = operator;
 
       if (apiKey || operator) {
@@ -324,16 +353,12 @@
     }
 
     function saveSettings() {
-      const apiKey = (apiKeyEl.value || '').trim();
+      const apiKey = apiKeyEl ? (apiKeyEl.value || '').trim() : '';
       const operator = (operatorEl.value || '').trim();
 
-      localStorage.setItem(LS_KEYS.apiKey, apiKey);
+      if (apiKeyEl) localStorage.setItem(LS_KEYS.apiKey, apiKey);
       localStorage.setItem(LS_KEYS.operator, operator);
 
-      if (!apiKey) {
-        setSettingsStatus('保存しました（API KEY が空です）', 'warn');
-        return;
-      }
       if (!operator) {
         setSettingsStatus('保存しました（operator が空です）', 'warn');
         return;
@@ -345,7 +370,7 @@
     function clearSettings() {
       localStorage.removeItem(LS_KEYS.apiKey);
       localStorage.removeItem(LS_KEYS.operator);
-      apiKeyEl.value = '';
+      if (apiKeyEl) apiKeyEl.value = '';
       operatorEl.value = '';
       setSettingsStatus('設定を消去しました', 'muted');
     }
@@ -394,8 +419,11 @@
     }
 
     async function fetchRoster() {
+      // 事前チェック（GAS運用踏襲）
+      if (!ensureSettingsOrWarn_('roster')) return;
+
       // CP1と同じ方式: 固定API_BASE + /roster
-      // （この段階ではAPI KEYは保存のみ。/checkin実装時に使用）
+      // API KEY は通信に載せない（Workers側で付与/検証想定）
       const url = `${FIXED_API_BASE}/roster`;
 
       btnFetchRoster.disabled = true;
@@ -715,6 +743,12 @@
       if (!pending) {
         const elCheckinActionResult = document.getElementById('checkinActionResult');
         if (elCheckinActionResult) elCheckinActionResult.textContent = '先にQRを読み取ってください';
+        return;
+      }
+
+      // 送信前チェック（GAS運用踏襲）
+      if (!ensureSettingsOrWarn_('checkin')) {
+        // pending は保持（再入力後に再送可能）
         return;
       }
 
