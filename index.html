@@ -533,56 +533,64 @@
 
                 const parsed = parseMst26Qr(code.data);
                 if (parsed) {
-                  const roster = getLocalRoster();
-                  const hit = roster.find((it) => {
-                    const bibVal = Number(it?.bibNumber ?? it?.bib);
-                    return Number.isFinite(bibVal) && bibVal === parsed.bib;
-                  }) || null;
-
-                  const name = hit ? String(hit.name ?? hit.runnerName ?? hit.fullName ?? '').trim() : '';
-
-                  // ---- 受付確定UIへ反映 ----
-                  const pending = {
-                    bib: parsed.bib,
-                    name: name || '',
-                    raw: parsed.raw,
-                    state: '', // RUN / DNS はまだ未選択
-                    // 再送時の重複送信を避けるため、event_id / scanned_at を固定化
-                    eventId: makeCheckinEventId_(),
-                    scannedAt: new Date().toISOString()
-                  };
-                  window.__checkinPending = pending;
-
-                  const elPendingBib = document.getElementById('pendingBib');
-                  const elPendingName = document.getElementById('pendingName');
-                  const elPendingRaw = document.getElementById('pendingRaw');
-                  const elPendingState = document.getElementById('pendingState');
-                  const elRunBtn = document.getElementById('runBtn');
-                  const elDnsBtn = document.getElementById('dnsBtn');
-                  const elCancelBtn = document.getElementById('cancelBtn');
-                  const elCheckinActionResult = document.getElementById('checkinActionResult');
-
-                  if (elPendingBib) elPendingBib.textContent = String(parsed.bib);
-                  if (elPendingName) elPendingName.textContent = name || '（名簿該当なし）';
-                  if (elPendingRaw) elPendingRaw.textContent = parsed.raw;
-                  if (elPendingState) elPendingState.textContent = '未選択';
-
-                  updateCheckinControlsState_();
-
-                  if (elCheckinActionResult) {
-                    elCheckinActionResult.textContent = '確定待ち（RUN / DNS / 取消 を選択）';
-                  }
-
-                  // ---- 既存の読取結果表示 ----
-                  if (name) {
-                    setStatus('QR読取OK（名簿照合OK）', 'ok');
-                    setResult(`bib: ${parsed.bib} / ${name} / raw: ${parsed.raw}`);
-                  } else if (roster.length === 0) {
-                    setStatus('QR読取OK（名簿未取得）', 'warn');
-                    setResult(`bib: ${parsed.bib} / 名簿未取得 / raw: ${parsed.raw}`);
+                  // pending が残っている間は上書きしない（ロック）
+                  if (window.__checkinPending) {
+                    const elCheckinActionResult = document.getElementById('checkinActionResult');
+                    if (elCheckinActionResult) {
+                      elCheckinActionResult.textContent = '確定待ち: RUN / DNS / 取消 を先に押してください';
+                    }
                   } else {
-                    setStatus('QR読取OK（名簿該当なし）', 'warn');
-                    setResult(`bib: ${parsed.bib} / 名簿該当なし / raw: ${parsed.raw}`);
+                    const roster = getLocalRoster();
+                    const hit = roster.find((it) => {
+                      const bibVal = Number(it?.bibNumber ?? it?.bib);
+                      return Number.isFinite(bibVal) && bibVal === parsed.bib;
+                    }) || null;
+
+                    const name = hit ? String(hit.name ?? hit.runnerName ?? hit.fullName ?? '').trim() : '';
+
+                    // ---- 受付確定UIへ反映 ----
+                    const pending = {
+                      bib: parsed.bib,
+                      name: name || '',
+                      raw: parsed.raw,
+                      state: '', // RUN / DNS はまだ未選択
+                      // 再送時の重複送信を避けるため、event_id / scanned_at を固定化
+                      eventId: makeCheckinEventId_(),
+                      scannedAt: new Date().toISOString()
+                    };
+                    window.__checkinPending = pending;
+
+                    const elPendingBib = document.getElementById('pendingBib');
+                    const elPendingName = document.getElementById('pendingName');
+                    const elPendingRaw = document.getElementById('pendingRaw');
+                    const elPendingState = document.getElementById('pendingState');
+                    const elRunBtn = document.getElementById('runBtn');
+                    const elDnsBtn = document.getElementById('dnsBtn');
+                    const elCancelBtn = document.getElementById('cancelBtn');
+                    const elCheckinActionResult = document.getElementById('checkinActionResult');
+
+                    if (elPendingBib) elPendingBib.textContent = String(parsed.bib);
+                    if (elPendingName) elPendingName.textContent = name || '（名簿該当なし）';
+                    if (elPendingRaw) elPendingRaw.textContent = parsed.raw;
+                    if (elPendingState) elPendingState.textContent = '未選択';
+
+                    updateCheckinControlsState_();
+
+                    if (elCheckinActionResult) {
+                      elCheckinActionResult.textContent = '確定待ち（RUN / DNS / 取消 を選択）';
+                    }
+
+                    // ---- 既存の読取結果表示 ----
+                    if (name) {
+                      setStatus('QR読取OK（名簿照合OK）', 'ok');
+                      setResult(`bib: ${parsed.bib} / ${name} / raw: ${parsed.raw}`);
+                    } else if (roster.length === 0) {
+                      setStatus('QR読取OK（名簿未取得）', 'warn');
+                      setResult(`bib: ${parsed.bib} / 名簿未取得 / raw: ${parsed.raw}`);
+                    } else {
+                      setStatus('QR読取OK（名簿該当なし）', 'warn');
+                      setResult(`bib: ${parsed.bib} / 名簿該当なし / raw: ${parsed.raw}`);
+                    }
                   }
                 } else {
                   setStatus('QR読取OK（形式未対応）', 'warn');
