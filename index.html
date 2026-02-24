@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <title>MST26 受付（checkin）- camera smoke test</title>
+  <title>MST26 受付（checkin）- camera + qr test</title>
   <style>
     :root {
       --bg: #111;
@@ -14,6 +14,7 @@
       --card: #1b1b1b;
       --btn: #2a2a2a;
       --btn2: #0a84ff;
+      --warn: #ffd166;
     }
     * { box-sizing: border-box; }
     body {
@@ -47,9 +48,9 @@
     }
     .status.ok { color: var(--ok); }
     .status.ng { color: var(--ng); }
+    .status.warn { color: var(--warn); }
     .status.muted { color: var(--muted); font-weight: 600; }
 
-    /* 正方形カメラ表示（v2.9の方向性を先に反映） */
     .camera-box {
       width: 100%;
       aspect-ratio: 1 / 1;
@@ -99,6 +100,23 @@
     button.primary { background: var(--btn2); }
     button:disabled { opacity: .45; }
 
+    .label {
+      color: var(--muted);
+      font-size: 12px;
+      margin-top: 10px;
+      margin-bottom: 4px;
+    }
+    .result {
+      min-height: 2.2em;
+      border-radius: 10px;
+      background: #151515;
+      border: 1px solid #2a2a2a;
+      padding: 10px;
+      font-weight: 700;
+      line-height: 1.4;
+      word-break: break-word;
+    }
+
     .small {
       color: var(--muted);
       font-size: 13px;
@@ -132,22 +150,35 @@
         <button id="btnStop">停止</button>
       </div>
 
+      <div class="label">読取結果（テスト）</div>
+      <div id="result" class="result">まだ読取なし</div>
+
       <div class="small">
-        ※ これは受付UIの土台確認（カメラ起動確認）だけです。<br>
+        ※ これは受付UIの段階実装（QR読取テスト）です。API接続はまだ入れていません。<br>
         ※ CP1（mst26-cp1）には影響しません。
       </div>
       <div id="debug" class="mono"></div>
     </div>
   </div>
 
+  <!-- QR decode library -->
+  <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
+
   <script>
     const statusEl = document.getElementById('status');
     const debugEl = document.getElementById('debug');
+    const resultEl = document.getElementById('result');
     const videoEl = document.getElementById('video');
     const btnStart = document.getElementById('btnStart');
     const btnStop = document.getElementById('btnStop');
 
     let stream = null;
+    let rafId = null;
+    let scanActive = false;
+    let lastScanText = '';
+    let lastScanAt = 0;
+    let decodeCanvas = document.createElement('canvas');
+    let decodeCtx = decodeCanvas.getContext('2d', { willReadFrequently: true });
 
     function setStatus(text, kind = 'muted') {
       statusEl.textContent = text;
@@ -162,12 +193,79 @@
       }
     }
 
+    function setResult(text) {
+      resultEl.textContent = text;
+    }
+
+    function parseMst26Qr(raw) {
+      if (!raw) return null;
+      const m = String(raw).trim().match(/^MST26:(\d{1,4})$/i);
+      if (!m) return null;
+      return { bib: Number(m[1]), raw: String(raw).trim() };
+    }
+
+    function startDecodeLoop() {
+      scanActive = true;
+
+      const loop = () => {
+        if (!scanActive) return;
+
+        try {
+          if (videoEl.readyState >= 2 && videoEl.videoWidth > 0 && videoEl.videoHeight > 0) {
+            const w = videoEl.videoWidth;
+            const h = videoEl.videoHeight;
+
+            if (decodeCanvas.width !== w || decodeCanvas.height !== h) {
+              decodeCanvas.width = w;
+              decodeCanvas.height = h;
+            }
+
+            decodeCtx.drawImage(videoEl, 0, 0, w, h);
+            const imageData = decodeCtx.getImageData(0, 0, w, h);
+            const code = jsQR(imageData.data, w, h, { inversionAttempts: 'dontInvert' });
+
+            if (code && code.data) {
+              const now = Date.now();
+
+              // 同一コード連発を少し抑制（テスト用）
+              if (!(code.data === lastScanText && (now - lastScanAt) < 1500)) {
+                lastScanText = code.data;
+                lastScanAt = now;
+
+                const parsed = parseMst26Qr(code.data);
+                if (parsed) {
+                  setStatus('QR読取OK（MST26形式）', 'ok');
+                  setResult(`bib: ${parsed.bib} / raw: ${parsed.raw}`);
+                } else {
+                  setStatus('QR読取OK（形式未対応）', 'warn');
+                  setResult(`raw: ${code.data}`);
+                }
+              }
+            }
+          }
+        } catch (e) {
+          setStatus('読取エラー', 'ng');
+          setDebug((e?.name ? e.name + ': ' : '') + (e?.message || String(e)));
+        }
+
+        rafId = requestAnimationFrame(loop);
+      };
+
+      rafId = requestAnimationFrame(loop);
+    }
+
+    function stopDecodeLoop() {
+      scanActive = false;
+      if (rafId) cancelAnimationFrame(rafId);
+      rafId = null;
+    }
+
     async function startCamera() {
       try {
         setStatus('カメラ起動中…', 'muted');
         setDebug('');
+        setResult('まだ読取なし');
 
-        // まず背面カメラ優先
         const constraints = {
           audio: false,
           video: {
@@ -182,11 +280,14 @@
         await videoEl.play();
 
         const track = stream.getVideoTracks()[0];
-        setStatus('カメラ起動OK', 'ok');
         setDebug({
           label: track?.label || '',
           settings: track?.getSettings ? track.getSettings() : null
         });
+
+        setStatus('カメラ起動OK（読取待機中）', 'ok');
+        stopDecodeLoop();
+        startDecodeLoop();
       } catch (e) {
         const msg = (e && e.name ? e.name + ': ' : '') + (e && e.message ? e.message : String(e));
         setStatus('スキャン開始失敗（権限？）', 'ng');
@@ -196,6 +297,7 @@
     }
 
     function stopCamera() {
+      stopDecodeLoop();
       try {
         if (stream) {
           for (const t of stream.getTracks()) t.stop();
@@ -210,7 +312,7 @@
     btnStart.addEventListener('click', startCamera);
     btnStop.addEventListener('click', stopCamera);
 
-    // iPhone Safariでの挙動確認のため、自動起動はまだしない（手動開始）
+    // iPhone Safari確認のため、まだ自動起動しない
   </script>
 </body>
 </html>
