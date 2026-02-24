@@ -165,6 +165,9 @@
     <div class="title">受付</div>
 
     <div class="card">
+      <div class="label" style="margin-top:0;">API KEY</div>
+      <input id="apiKey" class="input" type="text" inputmode="text" autocomplete="off" placeholder="API KEYを入力（/checkin用）" />
+
       <div class="label">operator（担当者名）</div>
       <input id="operator" class="input" type="text" inputmode="text" autocomplete="off" placeholder="例: けんすけ" />
 
@@ -177,7 +180,7 @@
       <div id="settingsStatus" class="substatus muted">設定はまだ保存していません</div>
       <div class="small">
         ※ API Base URL はコード内固定（CP1と同じアクセス方式）です。<br>
-        ※ operator を localStorage に保存します（端末内のみ）。API KEY は現時点では未使用です。
+        ※ API KEY / operator を localStorage に保存します（端末内のみ）。
       </div>
     </div>
 
