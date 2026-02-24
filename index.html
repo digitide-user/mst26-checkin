@@ -208,24 +208,13 @@
       <div class="label">読取結果</div>
       <div id="result" class="result">まだ読取なし</div>
 
-      <section style="margin-top:16px; padding:12px; border:1px solid #ccc; border-radius:8px;">
-        <h2 style="margin:0 0 8px 0; font-size:16px;">受付確定</h2>
-
-        <div id="pendingCheckinCard" style="padding:10px; background:#f7f7f7; color:#111; border-radius:6px; margin-bottom:10px;">
-          <div><strong>bib:</strong> <span id="pendingBib">-</span></div>
-          <div><strong>氏名:</strong> <span id="pendingName">-</span></div>
-          <div><strong>raw:</strong> <span id="pendingRaw">-</span></div>
-          <div><strong>状態:</strong> <span id="pendingState">未選択</span></div>
-        </div>
-
-        <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:8px;">
-          <button id="runBtn" type="button" disabled>RUN</button>
-          <button id="dnsBtn" type="button" disabled>DNS</button>
-          <button id="cancelBtn" type="button" disabled>取消</button>
-        </div>
-
-        <div id="checkinActionResult">まだ未確定</div>
-      </section>
+      <!-- 読取結果の直下に ステータス表示 + RUN/DNS/取消 を配置 -->
+      <div id="checkinActionResult" style="margin-top:8px;">まだ未確定</div>
+      <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:8px; margin-bottom:8px;">
+        <button id="runBtn" type="button" disabled>RUN</button>
+        <button id="dnsBtn" type="button" disabled>DNS</button>
+        <button id="cancelBtn" type="button" disabled>取消</button>
+      </div>
 
       
       <div id="debug" class="mono"></div>
