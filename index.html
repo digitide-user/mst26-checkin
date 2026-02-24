@@ -165,6 +165,9 @@
     <div class="title">受付</div>
 
     <div class="card">
+      <div class="label" style="margin-top:0;">API KEY</div>
+      <input id="apiKey" class="input" type="text" inputmode="text" autocomplete="off" placeholder="API KEYを入力（/checkin用）" />
+
       <div class="label">operator（担当者名）</div>
       <input id="operator" class="input" type="text" inputmode="text" autocomplete="off" placeholder="例: けんすけ" />
 
@@ -177,7 +180,7 @@
       <div id="settingsStatus" class="substatus muted">設定はまだ保存していません</div>
       <div class="small">
         ※ API Base URL はコード内固定（CP1と同じアクセス方式）です。<br>
-        ※ operator を localStorage に保存します（端末内のみ）。API KEY は現時点では未使用です。
+        ※ API KEY / operator を localStorage に保存します（端末内のみ）。
       </div>
     </div>
 
@@ -308,7 +311,7 @@
       const apiKey = localStorage.getItem(LS_KEYS.apiKey) || '';
       const operator = localStorage.getItem(LS_KEYS.operator) || '';
 
-      if (apiKeyEl) apiKeyEl.value = apiKey;
+      apiKeyEl.value = apiKey;
       operatorEl.value = operator;
 
       if (apiKey || operator) {
@@ -321,12 +324,16 @@
     }
 
     function saveSettings() {
-      const apiKey = apiKeyEl ? (apiKeyEl.value || '').trim() : '';
+      const apiKey = (apiKeyEl.value || '').trim();
       const operator = (operatorEl.value || '').trim();
 
-      if (apiKeyEl) localStorage.setItem(LS_KEYS.apiKey, apiKey);
+      localStorage.setItem(LS_KEYS.apiKey, apiKey);
       localStorage.setItem(LS_KEYS.operator, operator);
 
+      if (!apiKey) {
+        setSettingsStatus('保存しました（API KEY が空です）', 'warn');
+        return;
+      }
       if (!operator) {
         setSettingsStatus('保存しました（operator が空です）', 'warn');
         return;
@@ -338,7 +345,7 @@
     function clearSettings() {
       localStorage.removeItem(LS_KEYS.apiKey);
       localStorage.removeItem(LS_KEYS.operator);
-      if (apiKeyEl) apiKeyEl.value = '';
+      apiKeyEl.value = '';
       operatorEl.value = '';
       setSettingsStatus('設定を消去しました', 'muted');
     }
@@ -388,7 +395,7 @@
 
     async function fetchRoster() {
       // CP1と同じ方式: 固定API_BASE + /roster
-      // API KEY は現時点では未使用（UI上も非表示）
+      // （この段階ではAPI KEYは保存のみ。/checkin実装時に使用）
       const url = `${FIXED_API_BASE}/roster`;
 
       btnFetchRoster.disabled = true;
