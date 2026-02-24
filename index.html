@@ -304,6 +304,38 @@
       resultEl.textContent = text;
     }
 
+    function getCurrentSettings_() {
+      const apiKey = (apiKeyEl && typeof apiKeyEl.value === 'string' && apiKeyEl.value.trim())
+        || (localStorage.getItem(LS_KEYS.apiKey) || '').trim();
+      const operator = (operatorEl && typeof operatorEl.value === 'string' && operatorEl.value.trim())
+        || (localStorage.getItem(LS_KEYS.operator) || '').trim();
+      return { apiKey, operator };
+    }
+
+    // 用途ごと（'roster' / 'checkin'）に不足メッセージを適切な場所へ表示
+    function ensureSettingsOrWarn_(context = 'roster') {
+      const { apiKey, operator } = getCurrentSettings_();
+      const missing = [];
+      if (!apiKey) missing.push('API KEY');
+      if (!operator) missing.push('operator');
+      if (missing.length === 0) return true;
+
+      const msgMissing = missing.join(' / ');
+      const baseMsg = context === 'checkin'
+        ? `送信不可: 設定未入力（${msgMissing}）`
+        : `名簿更新不可: 設定未入力（${msgMissing}）`;
+
+      // 表示先を用途で切り替えつつ、設定にも注意喚起
+      if (context === 'checkin') {
+        const elCheckinActionResult = document.getElementById('checkinActionResult');
+        if (elCheckinActionResult) elCheckinActionResult.textContent = baseMsg;
+      } else {
+        setRosterStatus(baseMsg, 'ng');
+      }
+      setSettingsStatus(`設定が不足しています（${msgMissing}）。設定を保存してください。`, 'warn');
+      return false;
+    }
+
     function loadSettings() {
       const apiKey = localStorage.getItem(LS_KEYS.apiKey) || '';
       const operator = localStorage.getItem(LS_KEYS.operator) || '';
@@ -387,8 +419,11 @@
     }
 
     async function fetchRoster() {
+      // 事前チェック（GAS運用踏襲）
+      if (!ensureSettingsOrWarn_('roster')) return;
+
       // CP1と同じ方式: 固定API_BASE + /roster
-      // API KEY は現時点では未使用（UI上も非表示）
+      // API KEY は通信に載せない（Workers側で付与/検証想定）
       const url = `${FIXED_API_BASE}/roster`;
 
       btnFetchRoster.disabled = true;
@@ -708,6 +743,12 @@
       if (!pending) {
         const elCheckinActionResult = document.getElementById('checkinActionResult');
         if (elCheckinActionResult) elCheckinActionResult.textContent = '先にQRを読み取ってください';
+        return;
+      }
+
+      // 送信前チェック（GAS運用踏襲）
+      if (!ensureSettingsOrWarn_('checkin')) {
+        // pending は保持（再入力後に再送可能）
         return;
       }
 
