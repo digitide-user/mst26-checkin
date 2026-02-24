@@ -1,0 +1,216 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>MST26 受付（checkin）- camera smoke test</title>
+  <style>
+    :root {
+      --bg: #111;
+      --fg: #f5f5f5;
+      --muted: #bbb;
+      --ok: #3ddc84;
+      --ng: #ff6b6b;
+      --card: #1b1b1b;
+      --btn: #2a2a2a;
+      --btn2: #0a84ff;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--fg);
+    }
+    .wrap {
+      max-width: 520px;
+      margin: 0 auto;
+      padding: 16px;
+    }
+    .title {
+      font-size: 28px;
+      font-weight: 800;
+      text-align: center;
+      margin: 8px 0 12px;
+      letter-spacing: .03em;
+    }
+    .card {
+      background: var(--card);
+      border-radius: 14px;
+      padding: 12px;
+      margin-bottom: 12px;
+    }
+    .status {
+      min-height: 1.4em;
+      font-weight: 700;
+      margin-bottom: 8px;
+    }
+    .status.ok { color: var(--ok); }
+    .status.ng { color: var(--ng); }
+    .status.muted { color: var(--muted); font-weight: 600; }
+
+    /* 正方形カメラ表示（v2.9の方向性を先に反映） */
+    .camera-box {
+      width: 100%;
+      aspect-ratio: 1 / 1;
+      border-radius: 14px;
+      overflow: hidden;
+      background: #000;
+      position: relative;
+      border: 1px solid #333;
+    }
+    video {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+      background: #000;
+    }
+    .overlay {
+      position: absolute;
+      inset: 0;
+      display: grid;
+      place-items: center;
+      pointer-events: none;
+    }
+    .qr-frame {
+      width: 82%;
+      height: 82%;
+      border: 3px solid rgba(255,255,255,.85);
+      border-radius: 16px;
+      box-shadow: 0 0 0 9999px rgba(0,0,0,.18) inset;
+    }
+
+    .row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+    button {
+      appearance: none;
+      border: 0;
+      border-radius: 12px;
+      padding: 14px 12px;
+      font-size: 16px;
+      font-weight: 700;
+      color: #fff;
+      background: var(--btn);
+    }
+    button.primary { background: var(--btn2); }
+    button:disabled { opacity: .45; }
+
+    .small {
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.5;
+      margin-top: 8px;
+    }
+    .mono {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 12px;
+      white-space: pre-wrap;
+      word-break: break-word;
+      color: var(--muted);
+      margin-top: 8px;
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="title">受付</div>
+
+    <div class="card">
+      <div id="status" class="status muted">待機中（まだ開始していません）</div>
+
+      <div class="camera-box">
+        <video id="video" playsinline muted autoplay></video>
+        <div class="overlay"><div class="qr-frame"></div></div>
+      </div>
+
+      <div class="row" style="margin-top:10px;">
+        <button id="btnStart" class="primary">スキャン開始（カメラ起動）</button>
+        <button id="btnStop">停止</button>
+      </div>
+
+      <div class="small">
+        ※ これは受付UIの土台確認（カメラ起動確認）だけです。<br>
+        ※ CP1（mst26-cp1）には影響しません。
+      </div>
+      <div id="debug" class="mono"></div>
+    </div>
+  </div>
+
+  <script>
+    const statusEl = document.getElementById('status');
+    const debugEl = document.getElementById('debug');
+    const videoEl = document.getElementById('video');
+    const btnStart = document.getElementById('btnStart');
+    const btnStop = document.getElementById('btnStop');
+
+    let stream = null;
+
+    function setStatus(text, kind = 'muted') {
+      statusEl.textContent = text;
+      statusEl.className = 'status ' + kind;
+    }
+
+    function setDebug(obj) {
+      try {
+        debugEl.textContent = typeof obj === 'string' ? obj : JSON.stringify(obj, null, 2);
+      } catch {
+        debugEl.textContent = String(obj);
+      }
+    }
+
+    async function startCamera() {
+      try {
+        setStatus('カメラ起動中…', 'muted');
+        setDebug('');
+
+        // まず背面カメラ優先
+        const constraints = {
+          audio: false,
+          video: {
+            facingMode: { ideal: 'environment' },
+            width: { ideal: 1280 },
+            height: { ideal: 1280 }
+          }
+        };
+
+        stream = await navigator.mediaDevices.getUserMedia(constraints);
+        videoEl.srcObject = stream;
+        await videoEl.play();
+
+        const track = stream.getVideoTracks()[0];
+        setStatus('カメラ起動OK', 'ok');
+        setDebug({
+          label: track?.label || '',
+          settings: track?.getSettings ? track.getSettings() : null
+        });
+      } catch (e) {
+        const msg = (e && e.name ? e.name + ': ' : '') + (e && e.message ? e.message : String(e));
+        setStatus('スキャン開始失敗（権限？）', 'ng');
+        setDebug(msg);
+        console.error(e);
+      }
+    }
+
+    function stopCamera() {
+      try {
+        if (stream) {
+          for (const t of stream.getTracks()) t.stop();
+        }
+      } finally {
+        stream = null;
+        videoEl.srcObject = null;
+        setStatus('停止しました', 'muted');
+      }
+    }
+
+    btnStart.addEventListener('click', startCamera);
+    btnStop.addEventListener('click', stopCamera);
+
+    // iPhone Safariでの挙動確認のため、自動起動はまだしない（手動開始）
+  </script>
+</body>
+</html>
