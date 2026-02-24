@@ -306,7 +306,7 @@
         }
         if (!__beepGain) {
           __beepGain = __beepCtx.createGain();
-          __beepGain.gain.value = 0.06; // 控えめ音量
+          __beepGain.gain.value = 0.12; // 少し上げる
           __beepGain.connect(__beepCtx.destination);
         }
       } catch (_) {}
@@ -318,11 +318,11 @@
         if (!__beepCtx || !__beepGain) return;
         const osc = __beepCtx.createOscillator();
         osc.type = 'sine';
-        osc.frequency.value = 1000; // 1kHz程度
+        osc.frequency.value = 1200; // 少し高め（聞こえやすく）
         osc.connect(__beepGain);
         const now = __beepCtx.currentTime;
         osc.start(now);
-        osc.stop(now + 0.15); // 150ms ビープ
+        osc.stop(now + 0.20); // 200ms ビープ
       } catch (_) {}
     }
 
