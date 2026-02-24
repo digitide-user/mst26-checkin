@@ -617,6 +617,69 @@
       }
     }
 
+    function makeCheckinEventId_() {
+      try {
+        if (window.crypto && typeof window.crypto.randomUUID === 'function') {
+          return window.crypto.randomUUID();
+        }
+      } catch (_) {}
+      return `evt-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+    }
+
+    function getOrCreateCheckinDeviceId_() {
+      const key = 'mst26.checkin.deviceId';
+      try {
+        const existing = (localStorage.getItem(key) || '').trim();
+        if (existing) return existing;
+      } catch (_) {}
+
+      let suffix = '';
+      try {
+        if (window.crypto && typeof window.crypto.randomUUID === 'function') {
+          suffix = window.crypto.randomUUID();
+        }
+      } catch (_) {}
+      if (!suffix) suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+
+      const deviceId = `dev-checkin-${suffix}`;
+      try { localStorage.setItem(key, deviceId); } catch (_) {}
+      return deviceId;
+    }
+
+    function toCheckinStartStatus_(uiState) {
+      // UIボタンの "DNS" は API/GAS 側の start_status としては DNS_DESK に送る
+      return uiState === 'DNS' ? 'DNS_DESK' : uiState;
+    }
+
+    async function postCheckin_(pending, uiState) {
+      const url = `${FIXED_API_BASE}/checkin`;
+
+      const operator =
+        ((operatorEl && operatorEl.value) ? operatorEl.value : (localStorage.getItem(LS_KEYS.operator) || ''))
+          .trim();
+
+      const payload = {
+        event_id: makeCheckinEventId_(),
+        bibNumber: Number(pending.bib),
+        start_status: toCheckinStartStatus_(uiState),
+        scanned_at: new Date().toISOString(),
+        device_id: getOrCreateCheckinDeviceId_(),
+        operator
+      };
+
+      // 仕様メモ: ブラウザ実装では Content-Type: application/json を明示しない（プリフライト回避）
+      const res = await fetchJson(
+        url,
+        {
+          method: 'POST',
+          body: JSON.stringify(payload)
+        },
+        15000
+      );
+
+      return { url, payload, res };
+    }
+
     function resetPendingCheckinUi(actionMsg = 'まだ未確定') {
       window.__checkinPending = null;
 
@@ -641,7 +704,7 @@
       if (elCheckinActionResult) elCheckinActionResult.textContent = actionMsg;
     }
 
-    function handleCheckinActionSelect_(state) {
+    async function handleCheckinActionSelect_(state) {
       const pending = window.__checkinPending || null;
       if (!pending) {
         const elCheckinActionResult = document.getElementById('checkinActionResult');
@@ -649,25 +712,75 @@
         return;
       }
 
-      pending.state = state;
-      window.__checkinPending = pending;
-
       const elPendingState = document.getElementById('pendingState');
       const elRunBtn = document.getElementById('runBtn');
       const elDnsBtn = document.getElementById('dnsBtn');
       const elCancelBtn = document.getElementById('cancelBtn');
       const elCheckinActionResult = document.getElementById('checkinActionResult');
 
+      // UI上は押した値（RUN / DNS）を表示
+      pending.state = state;
+      window.__checkinPending = pending;
       if (elPendingState) elPendingState.textContent = state;
 
-      // テスト段階の仮動作：
-      // RUN/DNS を押したら一旦選択確定状態にして、取消だけ可能にする
+      // 送信中は二重送信防止
       if (elRunBtn) elRunBtn.disabled = true;
       if (elDnsBtn) elDnsBtn.disabled = true;
-      if (elCancelBtn) elCancelBtn.disabled = false;
+      if (elCancelBtn) elCancelBtn.disabled = true;
 
       if (elCheckinActionResult) {
-        elCheckinActionResult.textContent = `送信未実装（テスト）: ${state} を選択`;
+        elCheckinActionResult.textContent = `送信中… ${state}`;
+      }
+
+      try {
+        const { url, payload, res } = await postCheckin_(pending, state);
+
+        const appOk = !res.json || res.json.ok !== false;
+        if (!res.ok || !appOk) {
+          // 失敗時は pending を保持（再送しやすさ優先）
+          if (window.__checkinPending === pending) {
+            if (elRunBtn) elRunBtn.disabled = false;
+            if (elDnsBtn) elDnsBtn.disabled = false;
+            if (elCancelBtn) elCancelBtn.disabled = false;
+
+            if (elCheckinActionResult) {
+              elCheckinActionResult.textContent = `送信失敗: ${state}（再送可）`;
+            }
+          }
+
+          setDebug({
+            endpoint: url,
+            request: payload,
+            status: res.status,
+            responsePreview: String(res.text || '').slice(0, 500)
+          });
+          return;
+        }
+
+        setDebug({
+          endpoint: url,
+          request: payload,
+          response: res.json ?? String(res.text || '').slice(0, 500)
+        });
+
+        // 送信成功時は pending をクリア（次スキャンへ）
+        // ※送信中に別のQRで pending が上書きされていたら消さない
+        if (window.__checkinPending === pending) {
+          resetPendingCheckinUi(`送信OK: ${state}`);
+        } else if (elCheckinActionResult) {
+          elCheckinActionResult.textContent = `送信OK: ${state}`;
+        }
+      } catch (e) {
+        if (window.__checkinPending === pending) {
+          if (elRunBtn) elRunBtn.disabled = false;
+          if (elDnsBtn) elDnsBtn.disabled = false;
+          if (elCancelBtn) elCancelBtn.disabled = false;
+
+          if (elCheckinActionResult) {
+            elCheckinActionResult.textContent = `送信失敗: ${state}（再送可）`;
+          }
+        }
+        setDebug((e?.name ? e.name + ': ' : '') + (e?.message || String(e)));
       }
     }
 
