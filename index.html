@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <title>MST26 受付（checkin）- camera + qr test</title>
+  <title>MST26 受付（checkin）- settings + camera + qr test</title>
   <style>
     :root {
       --bg: #111;
@@ -15,6 +15,8 @@
       --btn: #2a2a2a;
       --btn2: #0a84ff;
       --warn: #ffd166;
+      --line: #2a2a2a;
+      --input: #161616;
     }
     * { box-sizing: border-box; }
     body {
@@ -50,6 +52,16 @@
     .status.ng { color: var(--ng); }
     .status.warn { color: var(--warn); }
     .status.muted { color: var(--muted); font-weight: 600; }
+
+    .substatus {
+      min-height: 1.2em;
+      font-size: 13px;
+      font-weight: 700;
+      margin-top: 8px;
+    }
+    .substatus.ok { color: var(--ok); }
+    .substatus.ng { color: var(--ng); }
+    .substatus.muted { color: var(--muted); }
 
     .camera-box {
       width: 100%;
@@ -87,6 +99,11 @@
       grid-template-columns: 1fr 1fr;
       gap: 8px;
     }
+    .row3 {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 8px;
+    }
     button {
       appearance: none;
       border: 0;
@@ -105,6 +122,15 @@
       font-size: 12px;
       margin-top: 10px;
       margin-bottom: 4px;
+    }
+    .input {
+      width: 100%;
+      border: 1px solid var(--line);
+      background: var(--input);
+      color: var(--fg);
+      border-radius: 10px;
+      padding: 12px;
+      font-size: 16px;
     }
     .result {
       min-height: 2.2em;
@@ -138,6 +164,25 @@
     <div class="title">受付</div>
 
     <div class="card">
+      <div class="label" style="margin-top:0;">API KEY</div>
+      <input id="apiKey" class="input" type="text" inputmode="text" autocomplete="off" placeholder="API KEYを入力" />
+
+      <div class="label">operator（担当者名）</div>
+      <input id="operator" class="input" type="text" inputmode="text" autocomplete="off" placeholder="例: けんすけ" />
+
+      <div class="row3" style="margin-top:10px;">
+        <button id="btnLoadSettings">読込</button>
+        <button id="btnSaveSettings" class="primary">保存</button>
+        <button id="btnClearSettings">消去</button>
+      </div>
+
+      <div id="settingsStatus" class="substatus muted">設定はまだ保存していません</div>
+      <div class="small">
+        ※ この段階では localStorage 保存/読込のみ。API送信はまだ行いません。
+      </div>
+    </div>
+
+    <div class="card">
       <div id="status" class="status muted">待機中（まだ開始していません）</div>
 
       <div class="camera-box">
@@ -154,7 +199,7 @@
       <div id="result" class="result">まだ読取なし</div>
 
       <div class="small">
-        ※ これは受付UIの段階実装（QR読取テスト）です。API接続はまだ入れていません。<br>
+        ※ これは受付UIの段階実装（設定保存 + QR読取テスト）です。API接続はまだ入れていません。<br>
         ※ CP1（mst26-cp1）には影響しません。
       </div>
       <div id="debug" class="mono"></div>
@@ -165,12 +210,25 @@
   <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
 
   <script>
+    // ---- storage keys (checkin専用) ----
+    const LS_KEYS = {
+      apiKey: 'mst26.checkin.apiKey',
+      operator: 'mst26.checkin.operator'
+    };
+
     const statusEl = document.getElementById('status');
     const debugEl = document.getElementById('debug');
     const resultEl = document.getElementById('result');
     const videoEl = document.getElementById('video');
     const btnStart = document.getElementById('btnStart');
     const btnStop = document.getElementById('btnStop');
+
+    const apiKeyEl = document.getElementById('apiKey');
+    const operatorEl = document.getElementById('operator');
+    const btnLoadSettings = document.getElementById('btnLoadSettings');
+    const btnSaveSettings = document.getElementById('btnSaveSettings');
+    const btnClearSettings = document.getElementById('btnClearSettings');
+    const settingsStatusEl = document.getElementById('settingsStatus');
 
     let stream = null;
     let rafId = null;
@@ -185,6 +243,11 @@
       statusEl.className = 'status ' + kind;
     }
 
+    function setSettingsStatus(text, kind = 'muted') {
+      settingsStatusEl.textContent = text;
+      settingsStatusEl.className = 'substatus ' + kind;
+    }
+
     function setDebug(obj) {
       try {
         debugEl.textContent = typeof obj === 'string' ? obj : JSON.stringify(obj, null, 2);
@@ -195,6 +258,46 @@
 
     function setResult(text) {
       resultEl.textContent = text;
+    }
+
+    function loadSettings() {
+      const apiKey = localStorage.getItem(LS_KEYS.apiKey) || '';
+      const operator = localStorage.getItem(LS_KEYS.operator) || '';
+      apiKeyEl.value = apiKey;
+      operatorEl.value = operator;
+
+      if (apiKey || operator) {
+        setSettingsStatus('保存済み設定を読込しました', 'ok');
+      } else {
+        setSettingsStatus('保存済み設定はありません', 'muted');
+      }
+    }
+
+    function saveSettings() {
+      const apiKey = (apiKeyEl.value || '').trim();
+      const operator = (operatorEl.value || '').trim();
+
+      localStorage.setItem(LS_KEYS.apiKey, apiKey);
+      localStorage.setItem(LS_KEYS.operator, operator);
+
+      if (!apiKey) {
+        setSettingsStatus('保存しました（API KEY が空です）', 'ng');
+        return;
+      }
+      if (!operator) {
+        setSettingsStatus('保存しました（operator が空です）', 'ng');
+        return;
+      }
+
+      setSettingsStatus('設定を保存しました', 'ok');
+    }
+
+    function clearSettings() {
+      localStorage.removeItem(LS_KEYS.apiKey);
+      localStorage.removeItem(LS_KEYS.operator);
+      apiKeyEl.value = '';
+      operatorEl.value = '';
+      setSettingsStatus('設定を消去しました', 'muted');
     }
 
     function parseMst26Qr(raw) {
@@ -311,6 +414,13 @@
 
     btnStart.addEventListener('click', startCamera);
     btnStop.addEventListener('click', stopCamera);
+
+    btnLoadSettings.addEventListener('click', loadSettings);
+    btnSaveSettings.addEventListener('click', saveSettings);
+    btnClearSettings.addEventListener('click', clearSettings);
+
+    // 初回表示時に保存済み設定があれば反映
+    loadSettings();
 
     // iPhone Safari確認のため、まだ自動起動しない
   </script>
