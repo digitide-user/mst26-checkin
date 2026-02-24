@@ -205,11 +205,11 @@
         <button id="btnStop">停止</button>
       </div>
 
-      <div class="label">読取結果（テスト）</div>
+      <div class="label">読取結果</div>
       <div id="result" class="result">まだ読取なし</div>
 
       <section style="margin-top:16px; padding:12px; border:1px solid #ccc; border-radius:8px;">
-        <h2 style="margin:0 0 8px 0; font-size:16px;">受付確定（テスト段階）</h2>
+        <h2 style="margin:0 0 8px 0; font-size:16px;">受付確定</h2>
 
         <div id="pendingCheckinCard" style="padding:10px; background:#f7f7f7; color:#111; border-radius:6px; margin-bottom:10px;">
           <div><strong>bib:</strong> <span id="pendingBib">-</span></div>
@@ -227,10 +227,7 @@
         <div id="checkinActionResult">まだ未確定</div>
       </section>
 
-      <div class="small">
-        ※ これは受付UIの段階実装（設定保存 + 名簿更新 + QR読取テスト）です。<br>
-        ※ <code>/checkin</code> はまだ未実装です。CP1（mst26-cp1）には影響しません。
-      </div>
+      
       <div id="debug" class="mono"></div>
     </div>
   </div>
@@ -523,7 +520,7 @@
 
                   const name = hit ? String(hit.name ?? hit.runnerName ?? hit.fullName ?? '').trim() : '';
 
-                  // ---- 受付確定UI（テスト段階）へ反映 ----
+                  // ---- 受付確定UIへ反映 ----
                   const pending = {
                     bib: parsed.bib,
                     name: name || '',
@@ -818,7 +815,7 @@
     }
 
     function handleCheckinCancel_() {
-      resetPendingCheckinUi('取消しました（テスト）');
+      resetPendingCheckinUi('取消しました');
     }
 
     btnStart.addEventListener('click', startCamera);
@@ -831,7 +828,7 @@
     btnFetchRoster.addEventListener('click', fetchRoster);
     btnShowRosterInfo.addEventListener('click', showRosterInfo);
 
-    // 受付確定（テスト段階）
+    // 受付確定
     document.getElementById('runBtn')?.addEventListener('click', () => handleCheckinActionSelect_('RUN'));
     document.getElementById('dnsBtn')?.addEventListener('click', () => handleCheckinActionSelect_('DNS'));
     document.getElementById('cancelBtn')?.addEventListener('click', handleCheckinCancel_);
