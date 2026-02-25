@@ -402,6 +402,27 @@
       if (wrap) wrap.style.display = 'none';
     }
 
+    function updateLocalRosterStartStatus_(bib, newStatus) {
+      try {
+        const roster = getLocalRoster();
+        if (!Array.isArray(roster) || roster.length === 0) return;
+        let changed = false;
+        for (const it of roster) {
+          const v = Number(it?.bibNumber ?? it?.bib);
+          if (Number.isFinite(v) && v === Number(bib)) {
+            it.start_status = newStatus;
+            if ('startStatus' in it) it.startStatus = newStatus;
+            changed = true;
+            break;
+          }
+        }
+        if (changed) {
+          const generatedAt = localStorage.getItem(LS_KEYS.rosterGeneratedAt) || '';
+          saveLocalRoster(roster, generatedAt);
+        }
+      } catch (_) {}
+    }
+
     function isOperatorSaved_() {
       const v = (localStorage.getItem(LS_KEYS.operator) || '').trim();
       return v.length > 0;
@@ -889,7 +910,8 @@
 
       // RUNのときのみ、DNSからRUNに変更する確認を行う（インラインUI）
       if (state === 'RUN') {
-        const currentStatus = (pending && pending.currentStartStatus) || findRosterStartStatusByBib_(pending.bib);
+        // 判定は常に最新のローカル名簿を参照（pendingの古い値に依存しない）
+        const currentStatus = findRosterStartStatusByBib_(pending.bib);
         if (shouldConfirmRunChange_(currentStatus)) {
           const ok = await openRunChangeInlineConfirm_(currentStatus);
           if (!ok) {
@@ -947,6 +969,9 @@
         // 送信成功時は pending をクリア（次スキャンへ）
         // ※送信中に別のQRで pending が上書きされていたら消さない
         if (window.__checkinPending === pending) {
+          // 成功内容をローカル名簿に反映（確認判定の最新化）
+          const applied = toCheckinStartStatus_(state);
+          updateLocalRosterStartStatus_(pending.bib, applied);
           resetPendingCheckinUi(`送信OK: ${state}`);
           closeRunChangeInlineConfirm_();
         } else if (elCheckinActionResult) {
