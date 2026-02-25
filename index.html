@@ -210,21 +210,20 @@
 
       <!-- 読取結果の直下に ステータス表示 + RUN/DNS/取消 を配置 -->
       <div id="checkinActionResult" style="margin-top:8px;">まだ未確定</div>
-      <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:8px; margin-bottom:8px;">
+      <div id="normalButtonsRow" style="display:flex; gap:8px; flex-wrap:wrap; margin-top:8px; margin-bottom:8px;">
         <button id="runBtn" type="button" disabled>RUN</button>
         <button id="dnsBtn" type="button" disabled>DNS</button>
         <button id="cancelBtn" type="button" disabled>取消</button>
       </div>
 
-      <!-- RUN変更インライン確認UI（オーバーレイは使わない） -->
-      <div id="runChangeConfirmInline" style="display:none; margin:8px 0; padding:10px; border:1px solid #d1d5db; border-radius:8px;">
-        <div id="runChangeConfirmMsgInline" style="font-weight:700; color:#b91c1c; margin-bottom:6px;">確認</div>
-        <div id="runChangeConfirmNoteInline" class="substatus muted" style="margin-bottom:8px;"></div>
-        <div style="display:flex; gap:8px;">
-          <button id="btnRunChangeCancelInline">キャンセル</button>
-          <button id="btnRunChangeOkInline" class="primary">変更する</button>
-        </div>
+      <!-- 確認時に差し替えて表示するボタン列（通常は非表示） -->
+      <div id="confirmButtonsRow" style="display:none; gap:8px; flex-wrap:wrap; margin-top:8px; margin-bottom:8px;">
+        <button id="btnRunConfirmCancel">キャンセル</button>
+        <button id="btnRunConfirmOk" class="primary">変更する</button>
       </div>
+
+      <!-- 旧インライン確認ブロックは使わない（残置、常時非表示） -->
+      <div id="runChangeConfirmInline" style="display:none;"></div>
 
       
       <!-- debug JSON は残すがUIでは非表示（必要時のみ再表示） -->
@@ -359,18 +358,15 @@
     }
 
     async function openRunChangeInlineConfirm_(currentStatus) {
-      const wrap = document.getElementById('runChangeConfirmInline');
-      const msg = document.getElementById('runChangeConfirmMsgInline');
-      const note = document.getElementById('runChangeConfirmNoteInline');
-      const ok = document.getElementById('btnRunChangeOkInline');
-      const cancel = document.getElementById('btnRunChangeCancelInline');
-      if (!wrap || !msg || !ok || !cancel) return true; // フォールバックで続行
+      const normalRow = document.getElementById('normalButtonsRow');
+      const confirmRow = document.getElementById('confirmButtonsRow');
+      const ok = document.getElementById('btnRunConfirmOk');
+      const cancel = document.getElementById('btnRunConfirmCancel');
+      const statusEl = document.getElementById('checkinActionResult');
+      if (!normalRow || !confirmRow || !ok || !cancel || !statusEl) return true; // フォールバック続行
 
-      msg.textContent = `この選手は現在 ${currentStatus} です。出走（RUN）に変更しますか？`;
-      note.textContent = '';
-      wrap.style.display = 'block';
-
-      // 確認時のみ status を取得（失敗しても続行）
+      // ステータス欄に赤字で確認文言
+      let baseMsg = `この選手は現在 ${currentStatus} です。出走（RUN）に変更しますか？`;
       try {
         const url = `${FIXED_API_BASE}/status`;
         const res = await fetchJson(url, { method: 'GET' }, 8000);
@@ -379,16 +375,26 @@
           const isClosed = !!(j.closed || j.is_closed || j.closed_at || j.closedAt);
           if (isClosed) {
             const when = j.closed_jst || j.closed_at_jst || j.closed_at || j.closedAt || '';
-            note.textContent = when ? `受付は締切済み（${String(when)} JST）` : '受付は締切済み';
+            baseMsg += when ? ` / 受付は締切済み（${String(when)} JST）` : ' / 受付は締切済み';
           }
         }
-      } catch (_) {}
+      } catch(_) {}
+
+      const prevColor = statusEl.style.color;
+      statusEl.style.color = '#b91c1c';
+      statusEl.textContent = baseMsg;
+
+      // ボタン列を差し替え
+      normalRow.style.display = 'none';
+      confirmRow.style.display = 'flex';
 
       return await new Promise((resolve) => {
         function cleanup() {
           try { ok.removeEventListener('click', onOk); } catch(_) {}
           try { cancel.removeEventListener('click', onCancel); } catch(_) {}
-          wrap.style.display = 'none';
+          confirmRow.style.display = 'none';
+          normalRow.style.display = 'flex';
+          statusEl.style.color = prevColor || '';
         }
         function onOk() { cleanup(); resolve(true); }
         function onCancel() { cleanup(); resolve(false); }
@@ -398,8 +404,14 @@
     }
 
     function closeRunChangeInlineConfirm_() {
-      const wrap = document.getElementById('runChangeConfirmInline');
-      if (wrap) wrap.style.display = 'none';
+      const normalRow = document.getElementById('normalButtonsRow');
+      const confirmRow = document.getElementById('confirmButtonsRow');
+      const statusEl = document.getElementById('checkinActionResult');
+      if (confirmRow && normalRow) {
+        confirmRow.style.display = 'none';
+        normalRow.style.display = 'flex';
+      }
+      if (statusEl) statusEl.style.color = '';
     }
 
     function updateLocalRosterStartStatus_(bib, newStatus) {
