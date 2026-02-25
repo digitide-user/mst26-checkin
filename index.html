@@ -222,6 +222,18 @@
     </div>
   </div>
 
+  <!-- RUN変更確認モーダル（自作、非ブロッキング） -->
+  <div id="runChangeConfirmOverlay" style="display:none; position:fixed; inset:0; background: rgba(0,0,0,.45); z-index:9999; align-items:center; justify-content:center;">
+    <div style="background:#fff; color:#111; padding:16px; border-radius:12px; width:min(520px, calc(100% - 32px)); box-shadow:0 8px 24px rgba(0,0,0,.25); margin: 0 auto;">
+      <div id="runChangeConfirmMsg" style="font-weight:700; font-size:16px; margin-bottom:8px;">確認</div>
+      <div id="runChangeConfirmNote" class="substatus muted" style="margin-bottom:10px;"></div>
+      <div style="display:flex; gap:10px; justify-content:flex-end;">
+        <button id="btnRunChangeCancel">キャンセル</button>
+        <button id="btnRunChangeOk" class="primary">変更する</button>
+      </div>
+    </div>
+  </div>
+
   <!-- QR decode library -->
   <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
 
@@ -330,6 +342,61 @@
       const operator = (operatorEl && typeof operatorEl.value === 'string' && operatorEl.value.trim())
         || (localStorage.getItem(LS_KEYS.operator) || '').trim();
       return { operator };
+    }
+
+    function findRosterStartStatusByBib_(bib) {
+      try {
+        const roster = getLocalRoster();
+        const hit = roster.find((it) => {
+          const v = Number(it?.bibNumber ?? it?.bib);
+          return Number.isFinite(v) && v === Number(bib);
+        }) || null;
+        const st = hit && (hit.start_status ?? hit.startStatus);
+        return typeof st === 'string' ? st : '';
+      } catch { return ''; }
+    }
+
+    function shouldConfirmRunChange_(currentStatus) {
+      return currentStatus === 'DNS_DESK' || currentStatus === 'DNS_NO_SHOW';
+    }
+
+    async function openRunChangeConfirmModal_(currentStatus) {
+      const overlay = document.getElementById('runChangeConfirmOverlay');
+      const msgEl = document.getElementById('runChangeConfirmMsg');
+      const noteEl = document.getElementById('runChangeConfirmNote');
+      const okBtn = document.getElementById('btnRunChangeOk');
+      const cancelBtn = document.getElementById('btnRunChangeCancel');
+      if (!overlay || !msgEl || !okBtn || !cancelBtn) return true; // フォールバックで続行
+
+      msgEl.textContent = `この選手は現在 ${currentStatus} です。出走（RUN）に変更しますか？`;
+      noteEl.textContent = '';
+
+      // status取得（締切注記は失敗しても続行）
+      try {
+        const url = `${FIXED_API_BASE}/status`;
+        const res = await fetchJson(url, { method: 'GET' }, 8000);
+        if (res && res.ok && res.json) {
+          const j = res.json;
+          const isClosed = !!(j.closed || j.is_closed || j.closed_at || j.closedAt);
+          if (isClosed) {
+            const when = j.closed_jst || j.closed_at_jst || j.closed_at || j.closedAt || '';
+            noteEl.textContent = when ? `受付は締切済み（${String(when)} JST）` : '受付は締切済み';
+          }
+        }
+      } catch (_) {}
+
+      return await new Promise((resolve) => {
+        function cleanup() {
+          try { okBtn.removeEventListener('click', onOk); } catch(_) {}
+          try { cancelBtn.removeEventListener('click', onCancel); } catch(_) {}
+          overlay.style.display = 'none';
+        }
+        function onOk() { cleanup(); resolve(true); }
+        function onCancel() { cleanup(); resolve(false); }
+        okBtn.addEventListener('click', onOk);
+        cancelBtn.addEventListener('click', onCancel);
+        overlay.style.display = 'flex';
+      });
     }
 
     function isOperatorSaved_() {
@@ -589,6 +656,7 @@
                       name: name || '',
                       raw: parsed.raw,
                       state: '', // RUN / DNS はまだ未選択
+                      currentStartStatus: (hit && (hit.start_status ?? hit.startStatus)) || '',
                       // 再送時の重複送信を避けるため、event_id / scanned_at を固定化
                       eventId: makeCheckinEventId_(),
                       scannedAt: new Date().toISOString()
@@ -779,6 +847,18 @@
       const elDnsBtn = document.getElementById('dnsBtn');
       const elCancelBtn = document.getElementById('cancelBtn');
       const elCheckinActionResult = document.getElementById('checkinActionResult');
+
+      // RUNのときのみ、DNSからRUNに変更する確認を行う
+      if (state === 'RUN') {
+        const currentStatus = (pending && pending.currentStartStatus) || findRosterStartStatusByBib_(pending.bib);
+        if (shouldConfirmRunChange_(currentStatus)) {
+          const ok = await openRunChangeConfirmModal_(currentStatus);
+          if (!ok) {
+            if (elCheckinActionResult) elCheckinActionResult.textContent = '変更をキャンセルしました';
+            return;
+          }
+        }
+      }
 
       if (elPendingBib) elPendingBib.textContent = '-';
       if (elPendingName) elPendingName.textContent = '-';
