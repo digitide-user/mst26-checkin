@@ -678,7 +678,8 @@
         }
 
         saveLocalRoster(roster, generatedAt);
-        setRosterStatus(`名簿更新OK: ${roster.length}件`, 'ok');
+        const displayAt = generatedAt ? formatJstDateTime(generatedAt) : '';
+        setRosterStatus(`名簿更新OK: ${roster.length}件${displayAt ? ' / ' + displayAt : ''}`, 'ok');
         updateCheckinControlsState_();
         setDebug({
           endpoint: url,
