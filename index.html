@@ -105,6 +105,12 @@
       grid-template-columns: 1fr 1fr 1fr;
       gap: 8px;
     }
+    .row-op {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 8px;
+      align-items: center;
+    }
     button {
       appearance: none;
       border: 0;
@@ -166,19 +172,12 @@
 
     <div class="card">
       <div class="label">operator（担当者名）</div>
-      <input id="operator" class="input" type="text" inputmode="text" autocomplete="off" placeholder="例: けんすけ" />
-
-      <div class="row3" style="margin-top:10px;">
-        <button id="btnLoadSettings">読込</button>
+      <div class="row-op" style="margin-top:6px;">
+        <input id="operator" class="input" type="text" inputmode="text" autocomplete="off" placeholder="入力→保存してください" />
         <button id="btnSaveSettings" class="primary">保存</button>
-        <button id="btnClearSettings">消去</button>
       </div>
 
       <div id="settingsStatus" class="substatus muted">設定はまだ保存していません</div>
-      <div class="small">
-        ※ API Base URL はコード内固定（CP1と同じアクセス方式）です。<br>
-        ※ operator を localStorage に保存します（端末内のみ）。
-      </div>
     </div>
 
     <div class="card">
@@ -187,22 +186,19 @@
         <button id="btnShowRosterInfo">名簿情報</button>
       </div>
       <div id="rosterStatus" class="substatus muted">名簿未取得</div>
-      <div class="small">
-        ※ CP1と同じ方式で、固定API_BASEの <code>/roster</code> を取得します。
-      </div>
     </div>
 
     <div class="card">
+      <div class="row" style="margin-top:10px;">
+        <button id="btnStart" class="primary">カメラ起動</button>
+        <button id="btnStop">停止</button>
+      </div>
+
       <div id="status" class="status muted">待機中（まだ開始していません）</div>
 
       <div class="camera-box">
         <video id="video" playsinline muted autoplay></video>
         <div class="overlay"><div class="qr-frame"></div></div>
-      </div>
-
-      <div class="row" style="margin-top:10px;">
-        <button id="btnStart" class="primary">スキャン開始（カメラ起動）</button>
-        <button id="btnStop">停止</button>
       </div>
 
       <div class="label">読取結果</div>
@@ -258,10 +254,8 @@
 
     const apiKeyEl = document.getElementById('apiKey');
     const operatorEl = document.getElementById('operator');
-    const btnLoadSettings = document.getElementById('btnLoadSettings');
     const btnSaveSettings = document.getElementById('btnSaveSettings');
     const retryOutboxBtn = document.getElementById('retryOutboxBtn');
-    const btnClearSettings = document.getElementById('btnClearSettings');
     const settingsStatusEl = document.getElementById('settingsStatus');
 
     const btnFetchRoster = document.getElementById('btnFetchRoster');
@@ -556,7 +550,7 @@
       operatorEl.value = operator;
 
       if (apiKey || operator) {
-        setSettingsStatus('保存済み設定を読込しました', 'ok');
+        setSettingsStatus('保存済み設定を反映しました', 'ok');
       } else {
         setSettingsStatus('保存済み設定はありません', 'muted');
       }
@@ -581,14 +575,7 @@
       updateCheckinControlsState_();
     }
 
-    function clearSettings() {
-      localStorage.removeItem(LS_KEYS.apiKey);
-      localStorage.removeItem(LS_KEYS.operator);
-      if (apiKeyEl) apiKeyEl.value = '';
-      operatorEl.value = '';
-      setSettingsStatus('設定を消去しました', 'muted');
-      updateCheckinControlsState_();
-    }
+    // clearSettings はUIから削除したため未使用
 
     function getLocalRoster() {
       try {
@@ -606,11 +593,32 @@
       localStorage.setItem(LS_KEYS.rosterGeneratedAt, String(generatedAt || ''));
     }
 
+    function formatJstDateTime(s) {
+      try {
+        if (!s) return '';
+        const d = new Date(s);
+        if (isNaN(d)) return String(s);
+        return d.toLocaleString('ja-JP', {
+          timeZone: 'Asia/Tokyo',
+          year: 'numeric',
+          month: '2-digit',
+          day: '2-digit',
+          hour: '2-digit',
+          minute: '2-digit',
+          second: '2-digit',
+          hour12: false
+        });
+      } catch (_) {
+        return String(s || '');
+      }
+    }
+
     function refreshRosterStatusFromLocal() {
       const roster = getLocalRoster();
       const generatedAt = localStorage.getItem(LS_KEYS.rosterGeneratedAt) || '';
       if (roster.length > 0) {
-        setRosterStatus(`名簿あり: ${roster.length}件${generatedAt ? ' / ' + generatedAt : ''}`, 'ok');
+        const displayAt = generatedAt ? formatJstDateTime(generatedAt) : '';
+        setRosterStatus(`名簿あり: ${roster.length}件${displayAt ? ' / ' + displayAt : ''}`, 'ok');
       } else {
         setRosterStatus('名簿未取得', 'muted');
       }
@@ -1201,9 +1209,7 @@
     btnStart.addEventListener('click', () => { try { ensureBeepReady_(); } catch(_) {} startCamera(); });
     btnStop.addEventListener('click', stopCamera);
 
-    btnLoadSettings.addEventListener('click', loadSettings);
     btnSaveSettings.addEventListener('click', () => { try { ensureBeepReady_(); } catch(_) {} saveSettings(); });
-    btnClearSettings.addEventListener('click', clearSettings);
 
     btnFetchRoster.addEventListener('click', () => { try { ensureBeepReady_(); } catch(_) {} fetchRoster(); });
     btnShowRosterInfo.addEventListener('click', showRosterInfo);
