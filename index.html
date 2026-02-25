@@ -214,6 +214,7 @@
         <button id="runBtn" type="button" disabled>RUN</button>
         <button id="dnsBtn" type="button" disabled>DNS</button>
         <button id="cancelBtn" type="button" disabled>取消</button>
+        <button id="retryOutboxBtn" type="button">未送信：0</button>
       </div>
 
       <!-- 確認時に差し替えて表示するボタン列（通常は非表示） -->
@@ -244,7 +245,8 @@
       apiKey: 'mst26.checkin.apiKey',
       operator: 'mst26.checkin.operator',
       roster: 'mst26.checkin.roster',
-      rosterGeneratedAt: 'mst26.checkin.roster.generatedAt'
+      rosterGeneratedAt: 'mst26.checkin.roster.generatedAt',
+      outbox: 'mst26.checkin.outbox'
     };
 
     const statusEl = document.getElementById('status');
@@ -258,12 +260,77 @@
     const operatorEl = document.getElementById('operator');
     const btnLoadSettings = document.getElementById('btnLoadSettings');
     const btnSaveSettings = document.getElementById('btnSaveSettings');
+    const retryOutboxBtn = document.getElementById('retryOutboxBtn');
     const btnClearSettings = document.getElementById('btnClearSettings');
     const settingsStatusEl = document.getElementById('settingsStatus');
 
     const btnFetchRoster = document.getElementById('btnFetchRoster');
     const btnShowRosterInfo = document.getElementById('btnShowRosterInfo');
     const rosterStatusEl = document.getElementById('rosterStatus');
+
+    let __outboxSending = false;
+
+    function getCheckinOutbox_() {
+      try {
+        const raw = localStorage.getItem(LS_KEYS.outbox);
+        if (!raw) return [];
+        const arr = JSON.parse(raw);
+        return Array.isArray(arr) ? arr : [];
+      } catch (_) {
+        return [];
+      }
+    }
+
+    function saveCheckinOutbox_(items) {
+      localStorage.setItem(LS_KEYS.outbox, JSON.stringify(Array.isArray(items) ? items : []));
+    }
+
+    function countCheckinOutbox_() {
+      return getCheckinOutbox_().length;
+    }
+
+    function renderCheckinOutboxButton_(opts) {
+      if (!retryOutboxBtn) return;
+      const mode = (opts && opts.mode) || 'idle';
+      const disabled = !!(opts && opts.disabled);
+      if (mode === 'sending') {
+        retryOutboxBtn.textContent = '送信中…';
+        retryOutboxBtn.disabled = true;
+        return;
+      }
+      const n = countCheckinOutbox_();
+      retryOutboxBtn.textContent = `未送信：${n}`;
+      retryOutboxBtn.disabled = disabled;
+    }
+
+    function enqueueCheckinOutbox_(item) {
+      if (!item || !item.eventId) return false;
+      try {
+        const list = getCheckinOutbox_();
+        const exists = list.some((it) => String(it?.eventId || '') === String(item.eventId));
+        if (exists) return false;
+        list.push(item); // FIFO
+        saveCheckinOutbox_(list);
+        renderCheckinOutboxButton_();
+        return true;
+      } catch (_) {
+        return false;
+      }
+    }
+
+    function dequeueCheckinOutboxHead_() {
+      const list = getCheckinOutbox_();
+      if (!list.length) return null;
+      const head = list.shift();
+      saveCheckinOutbox_(list);
+      renderCheckinOutboxButton_();
+      return head || null;
+    }
+
+    function peekCheckinOutboxHead_() {
+      const list = getCheckinOutbox_();
+      return list.length ? (list[0] || null) : null;
+    }
 
     let stream = null;
     let rafId = null;
@@ -871,6 +938,97 @@
       return { url, payload, res };
     }
 
+    async function retryCheckinOutbox_() {
+      if (__outboxSending) return;
+      __outboxSending = true;
+      renderCheckinOutboxButton_({ mode: 'sending', disabled: true });
+
+      const elCheckinActionResult = document.getElementById('checkinActionResult');
+      let okCount = 0;
+      let failCount = 0;
+
+      try {
+        // 設定/名簿は既存運用を踏襲（再送でも必要）
+        if (!ensureSettingsOrWarn_('checkin')) {
+          if (elCheckinActionResult) elCheckinActionResult.textContent = '再送不可: 設定未入力';
+          return;
+        }
+        if (!isRosterLoaded_()) {
+          if (elCheckinActionResult) elCheckinActionResult.textContent = '再送不可: 名簿未取得';
+          return;
+        }
+
+        while (true) {
+          const head = peekCheckinOutboxHead_();
+          if (!head) break;
+
+          // 既存 postCheckin_ を再利用（pending 互換オブジェクトを渡す）
+          const pendingLike = {
+            bib: Number(head.bib),
+            name: String(head.name || ''),
+            raw: String(head.raw || ''),
+            state: String(head.state || ''),
+            eventId: String(head.eventId || ''),
+            scannedAt: String(head.scannedAt || new Date().toISOString())
+          };
+          const state = String(head.state || '');
+
+          if (!Number.isFinite(Number(pendingLike.bib)) || !state) {
+            // 壊れたデータは捨てて進む（UIでハマらないように）
+            dequeueCheckinOutboxHead_();
+            failCount += 1;
+            continue;
+          }
+
+          if (elCheckinActionResult) {
+            elCheckinActionResult.textContent = `未送信を再送中… bib:${pendingLike.bib} ${state}`;
+          }
+
+          try {
+            const { url, payload, res } = await postCheckin_(pendingLike, state);
+            const appOk = !res.json || res.json.ok !== false;
+            if (!res.ok || !appOk) {
+              failCount += 1;
+              setDebug({
+                endpoint: url,
+                request: payload,
+                status: res.status,
+                responsePreview: String(res.text || '').slice(0, 500)
+              });
+              break; // 先頭失敗で停止（FIFO維持）
+            }
+
+            // 成功した先頭だけ取り除く
+            dequeueCheckinOutboxHead_();
+            okCount += 1;
+
+            // 確認判定の最新化のためローカル名簿にも反映
+            const applied = toCheckinStartStatus_(state);
+            updateLocalRosterStartStatus_(Number(pendingLike.bib), applied);
+          } catch (e) {
+            failCount += 1;
+            setDebug((e?.name ? e.name + ': ' : '') + (e?.message || String(e)));
+            break; // 先頭失敗で停止
+          }
+        }
+      } finally {
+        __outboxSending = false;
+        renderCheckinOutboxButton_();
+        const remain = countCheckinOutbox_();
+        if (elCheckinActionResult) {
+          if (okCount > 0 && remain === 0) {
+            elCheckinActionResult.textContent = `再送完了（${okCount}件成功 / 未送信：0）`;
+          } else if (okCount > 0) {
+            elCheckinActionResult.textContent = `再送完了（${okCount}件成功 / 未送信：${remain}）`;
+          } else if (remain > 0) {
+            elCheckinActionResult.textContent = `再送失敗（未送信：${remain}）`;
+          } else {
+            elCheckinActionResult.textContent = '未送信：0';
+          }
+        }
+      }
+    }
+
     function resetPendingCheckinUi(actionMsg = 'まだ未確定') {
       window.__checkinPending = null;
 
@@ -952,14 +1110,30 @@
 
         const appOk = !res.json || res.json.ok !== false;
         if (!res.ok || !appOk) {
-          // 失敗時は pending を保持（再送しやすさ優先）
+          // 失敗時は未送信キューへ退避して次スキャンへ（重複はeventIdで抑止）
+          let queued = false;
           if (window.__checkinPending === pending) {
-            if (elRunBtn) elRunBtn.disabled = false;
-            if (elDnsBtn) elDnsBtn.disabled = false;
-            if (elCancelBtn) elCancelBtn.disabled = false;
+            queued = enqueueCheckinOutbox_({
+              eventId: String(pending.eventId || ''),
+              scannedAt: String(pending.scannedAt || new Date().toISOString()),
+              bib: Number(pending.bib),
+              name: String(pending.name || ''),
+              raw: String(pending.raw || ''),
+              state: String(state || '')
+            });
+          }
 
-            if (elCheckinActionResult) {
-              elCheckinActionResult.textContent = `送信失敗: ${state}（再送可）`;
+          if (window.__checkinPending === pending) {
+            if (queued) {
+              resetPendingCheckinUi(`通信失敗 → 未送信に保存: ${state}`);
+            } else {
+              // キュー保存できない場合は従来どおり保持
+              if (elRunBtn) elRunBtn.disabled = false;
+              if (elDnsBtn) elDnsBtn.disabled = false;
+              if (elCancelBtn) elCancelBtn.disabled = false;
+              if (elCheckinActionResult) {
+                elCheckinActionResult.textContent = `送信失敗: ${state}（未送信保存NG / 再送可）`;
+              }
             }
           }
 
@@ -990,13 +1164,28 @@
           elCheckinActionResult.textContent = `送信OK: ${state}`;
         }
       } catch (e) {
+        let queued = false;
         if (window.__checkinPending === pending) {
-          if (elRunBtn) elRunBtn.disabled = false;
-          if (elDnsBtn) elDnsBtn.disabled = false;
-          if (elCancelBtn) elCancelBtn.disabled = false;
+          queued = enqueueCheckinOutbox_({
+            eventId: String(pending.eventId || ''),
+            scannedAt: String(pending.scannedAt || new Date().toISOString()),
+            bib: Number(pending.bib),
+            name: String(pending.name || ''),
+            raw: String(pending.raw || ''),
+            state: String(state || '')
+          });
+        }
 
-          if (elCheckinActionResult) {
-            elCheckinActionResult.textContent = `送信失敗: ${state}（再送可）`;
+        if (window.__checkinPending === pending) {
+          if (queued) {
+            resetPendingCheckinUi(`通信失敗 → 未送信に保存: ${state}`);
+          } else {
+            if (elRunBtn) elRunBtn.disabled = false;
+            if (elDnsBtn) elDnsBtn.disabled = false;
+            if (elCancelBtn) elCancelBtn.disabled = false;
+            if (elCheckinActionResult) {
+              elCheckinActionResult.textContent = `送信失敗: ${state}（未送信保存NG / 再送可）`;
+            }
           }
         }
         closeRunChangeInlineConfirm_();
@@ -1023,12 +1212,18 @@
     document.getElementById('runBtn')?.addEventListener('click', () => { try { ensureBeepReady_(); } catch(_) {} handleCheckinActionSelect_('RUN'); });
     document.getElementById('dnsBtn')?.addEventListener('click', () => { try { ensureBeepReady_(); } catch(_) {} handleCheckinActionSelect_('DNS'); });
     document.getElementById('cancelBtn')?.addEventListener('click', () => { try { ensureBeepReady_(); } catch(_) {} handleCheckinCancel_(); });
+    document.getElementById('retryOutboxBtn')?.addEventListener('click', async () => {
+      try { ensureBeepReady_(); } catch(_) {}
+      if (__outboxSending) return;
+      await retryCheckinOutbox_();
+    });
 
     // 初回ジェスチャでの有効化保険（ワンクリックのみ）
     try { document.addEventListener('click', ensureBeepReady_, { once: true, capture: true }); } catch(_) {}
 
     // 初期状態（受付確定UI）
     resetPendingCheckinUi();
+    renderCheckinOutboxButton_();
 
     // 初回表示時に保存済み設定があれば反映
     loadSettings();
