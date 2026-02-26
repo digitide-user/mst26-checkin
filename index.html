@@ -745,6 +745,7 @@
                     }) || null;
 
                     const name = hit ? String(hit.name ?? hit.runnerName ?? hit.fullName ?? '').trim() : '';
+                    const category = (hit && hit.category) ? String(hit.category).trim() : '';
 
                     // ---- 受付確定UIへ反映 ----
                     const pending = {
@@ -783,7 +784,8 @@
                     // ---- 既存の読取結果表示 ----
                     if (name) {
                       setStatus('QR読取OK（名簿照合OK）', 'ok');
-                      setResult(`bib: ${parsed.bib} / ${name}`);
+                      const catText = category ? ` / ${category}` : '';
+                      setResult(`bib: ${parsed.bib} / ${name}${catText}`);
                     } else if (roster.length === 0) {
                       setStatus('QR読取OK（名簿未取得）', 'warn');
                       setResult(`bib: ${parsed.bib} / 名簿未取得`);
