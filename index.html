@@ -183,7 +183,6 @@
     <div class="card">
       <div class="row">
         <button id="btnFetchRoster" class="primary">名簿更新</button>
-        <button id="btnShowRosterInfo">名簿情報</button>
       </div>
       <div id="rosterStatus" class="substatus muted">名簿未取得</div>
     </div>
@@ -202,7 +201,7 @@
       </div>
 
       <div class="label">読取結果</div>
-      <div id="result" class="result">まだ読取なし</div>
+      <div id="result" class="result">読取待ち</div>
 
       <!-- 読取結果の直下に ステータス表示 + RUN/DNS/取消 を配置 -->
       <div id="checkinActionResult" style="margin-top:8px;">まだ未確定</div>
@@ -259,7 +258,6 @@
     const settingsStatusEl = document.getElementById('settingsStatus');
 
     const btnFetchRoster = document.getElementById('btnFetchRoster');
-    const btnShowRosterInfo = document.getElementById('btnShowRosterInfo');
     const rosterStatusEl = document.getElementById('rosterStatus');
 
     let __outboxSending = false;
@@ -694,21 +692,7 @@
       }
     }
 
-    function showRosterInfo() {
-      const roster = getLocalRoster();
-      const generatedAt = localStorage.getItem(LS_KEYS.rosterGeneratedAt) || '';
-      if (!roster.length) {
-        setRosterStatus('保存済み名簿はありません', 'muted');
-        setDebug('roster: empty');
-        return;
-      }
-      setRosterStatus(`名簿あり: ${roster.length}件`, 'ok');
-      setDebug({
-        count: roster.length,
-        generated_at: generatedAt || null,
-        firstItem: roster[0] || null
-      });
-    }
+    // 名簿情報表示UIは削除
 
     function parseMst26Qr(raw) {
       if (!raw) return null;
@@ -799,18 +783,18 @@
                     // ---- 既存の読取結果表示 ----
                     if (name) {
                       setStatus('QR読取OK（名簿照合OK）', 'ok');
-                      setResult(`bib: ${parsed.bib} / ${name} / raw: ${parsed.raw}`);
+                      setResult(`bib: ${parsed.bib} / ${name}`);
                     } else if (roster.length === 0) {
                       setStatus('QR読取OK（名簿未取得）', 'warn');
-                      setResult(`bib: ${parsed.bib} / 名簿未取得 / raw: ${parsed.raw}`);
+                      setResult(`bib: ${parsed.bib} / 名簿未取得`);
                     } else {
                       setStatus('QR読取OK（名簿該当なし）', 'warn');
-                      setResult(`bib: ${parsed.bib} / 名簿該当なし / raw: ${parsed.raw}`);
+                      setResult(`bib: ${parsed.bib} / 名簿該当なし`);
                     }
                   }
                 } else {
                   setStatus('QR読取OK（形式未対応）', 'warn');
-                  setResult(`raw: ${code.data}`);
+                  setResult('読取待ち');
                 }
               }
             }
@@ -836,7 +820,7 @@
       try {
         setStatus('カメラ起動中…', 'muted');
         setDebug('');
-        setResult('まだ読取なし');
+        setResult('読取待ち');
 
         const constraints = {
           audio: false,
@@ -1060,6 +1044,8 @@
       if (elCancelBtn) elCancelBtn.disabled = true;
 
       if (elCheckinActionResult) elCheckinActionResult.textContent = actionMsg;
+      // 読取結果欄は次スキャンまでクリア（統一表示）
+      try { setResult('読取待ち'); } catch(_) {}
       updateCheckinControlsState_();
     }
 
@@ -1111,7 +1097,7 @@
       if (elCancelBtn) elCancelBtn.disabled = true;
 
       if (elCheckinActionResult) {
-        elCheckinActionResult.textContent = `送信中… ${state}`;
+        elCheckinActionResult.textContent = `送信中… bib:${pending.bib} ${state}`;
       }
 
       try {
@@ -1213,7 +1199,6 @@
     btnSaveSettings.addEventListener('click', () => { try { ensureBeepReady_(); } catch(_) {} saveSettings(); });
 
     btnFetchRoster.addEventListener('click', () => { try { ensureBeepReady_(); } catch(_) {} fetchRoster(); });
-    btnShowRosterInfo.addEventListener('click', showRosterInfo);
 
     // 受付確定
     document.getElementById('runBtn')?.addEventListener('click', () => { try { ensureBeepReady_(); } catch(_) {} handleCheckinActionSelect_('RUN'); });
